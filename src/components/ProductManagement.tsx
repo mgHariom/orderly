@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { Product } from '@/lib/types';
@@ -12,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { PlusCircle, Edit3, Trash2 } from 'lucide-react';
+import { PlusCircle, Edit3, Trash2, PackageSearch } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 
 interface ProductManagementProps {
@@ -26,6 +27,7 @@ const productSchema = z.object({
   name: z.string().min(1, "Product name is required"),
   price: z.coerce.number().min(0.01, "Price must be positive"),
   description: z.string().optional(),
+  category: z.string().optional(),
 });
 
 type ProductFormData = z.infer<typeof productSchema>;
@@ -38,7 +40,7 @@ export default function ProductManagement({ products, onAddProduct, onUpdateProd
 
   const addForm = useForm<ProductFormData>({
     resolver: zodResolver(productSchema),
-    defaultValues: { name: "", price: 0, description: "" },
+    defaultValues: { name: "", price: 0, description: "", category: "" },
   });
 
   const editForm = useForm<ProductFormData>({
@@ -47,7 +49,7 @@ export default function ProductManagement({ products, onAddProduct, onUpdateProd
 
   const handleAddSubmit: SubmitHandler<ProductFormData> = (data) => {
     onAddProduct(data);
-    addForm.reset();
+    addForm.reset({ name: "", price: 0, description: "", category: "" });
     setIsAddDialogOpen(false);
     toast({ title: "Product Added", description: `${data.name} has been added to the catalog.` });
   };
@@ -63,7 +65,7 @@ export default function ProductManagement({ products, onAddProduct, onUpdateProd
 
   const openEditDialog = (product: Product) => {
     setEditingProduct(product);
-    editForm.reset({ name: product.name, price: product.price, description: product.description || "" });
+    editForm.reset({ name: product.name, price: product.price, description: product.description || "", category: product.category || "" });
     setIsEditDialogOpen(true);
   };
 
@@ -76,10 +78,10 @@ export default function ProductManagement({ products, onAddProduct, onUpdateProd
   return (
     <Card className="shadow-lg">
       <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="font-headline">Manage Products</CardTitle>
+        <CardTitle className="font-headline flex items-center"><PackageSearch className="mr-2 h-5 w-5" />Manage Products</CardTitle>
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogTrigger asChild>
-            <Button size="sm" onClick={() => addForm.reset()}>
+            <Button size="sm" onClick={() => addForm.reset({ name: "", price: 0, description: "", category: "" })}>
               <PlusCircle className="mr-2 h-4 w-4" /> Add New Product
             </Button>
           </DialogTrigger>
@@ -101,6 +103,13 @@ export default function ProductManagement({ products, onAddProduct, onUpdateProd
                     <FormMessage />
                   </FormItem>
                 )} />
+                <FormField control={addForm.control} name="category" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Category (Optional)</FormLabel>
+                    <FormControl><Input placeholder="e.g., Drinkware" {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
                 <FormField control={addForm.control} name="description" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Description (Optional)</FormLabel>
@@ -119,13 +128,14 @@ export default function ProductManagement({ products, onAddProduct, onUpdateProd
       </CardHeader>
       <CardContent>
         {products.length === 0 ? (
-          <p className="text-muted-foreground text-center py-4">No products in catalog. Add some!</p>
+          <p className="text-muted-foreground text-center py-4 bg-muted/30 rounded-md">No products in catalog. Add some!</p>
         ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto border rounded-md shadow-sm">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
+                <TableHead>Category</TableHead>
                 <TableHead>Price</TableHead>
                 <TableHead className="hidden md:table-cell">Description</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -135,15 +145,16 @@ export default function ProductManagement({ products, onAddProduct, onUpdateProd
               {products.map((product) => (
                 <TableRow key={product.id}>
                   <TableCell className="font-medium">{product.name}</TableCell>
+                  <TableCell className="text-muted-foreground">{product.category || 'N/A'}</TableCell>
                   <TableCell>${product.price.toFixed(2)}</TableCell>
                   <TableCell className="hidden md:table-cell max-w-xs truncate">{product.description}</TableCell>
                   <TableCell className="text-right space-x-1">
-                    <Button variant="ghost" size="icon" onClick={() => openEditDialog(product)} className="hover:text-accent-foreground">
+                    <Button variant="ghost" size="icon" onClick={() => openEditDialog(product)} className="hover:text-primary hover:bg-primary/10 h-7 w-7">
                       <Edit3 className="h-4 w-4" />
                     </Button>
                     <Dialog>
                       <DialogTrigger asChild>
-                         <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive">
+                         <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10 h-7 w-7">
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </DialogTrigger>
@@ -181,6 +192,13 @@ export default function ProductManagement({ products, onAddProduct, onUpdateProd
                   <FormItem>
                     <FormLabel>Price ($)</FormLabel>
                     <FormControl><Input type="number" step="0.01" {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                 <FormField control={editForm.control} name="category" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Category (Optional)</FormLabel>
+                    <FormControl><Input {...field} /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )} />

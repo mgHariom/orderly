@@ -1,15 +1,17 @@
+
 export interface Product {
   id: string;
   name: string;
   price: number;
   description?: string;
+  category?: string; // Added category
 }
 
 export interface OrderItem {
   productId: string;
-  productName: string; 
+  productName: string;
   quantity: number;
-  price: number; 
+  price: number;
 }
 
 export interface Order {

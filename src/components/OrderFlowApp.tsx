@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
@@ -8,11 +9,13 @@ import ProductManagement from '@/components/ProductManagement';
 import OrderCreation from '@/components/OrderCreation';
 import PastOrders from '@/components/PastOrders';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ShoppingCart, PackagePlus, HistoryIcon, WorkflowIcon } from 'lucide-react';
+import { ShoppingCart, PackagePlus, HistoryIcon, WorkflowIcon, PackageSearch } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
+import { format } from 'date-fns';
 
 const PRODUCTS_STORAGE_KEY = 'orderflow-products';
 const ORDERS_STORAGE_KEY = 'orderflow-orders';
+const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 
 export default function OrderFlowApp() {
   const { toast } = useToast();
@@ -23,21 +26,42 @@ export default function OrderFlowApp() {
   const [currentCustomerName, setCurrentCustomerName] = useState<string>('');
   const [isSavingOrder, setIsSavingOrder] = useState(false);
   const [isClient, setIsClient] = useState(false);
+  const [initialAgedOrderCheckDone, setInitialAgedOrderCheckDone] = useState(false);
 
   useEffect(() => {
     setIsClient(true);
-    // Wrapped in try-catch in case localStorage parsing fails (e.g. corrupted data)
     try {
       setProducts(getLocalStorageItem<Product[]>(PRODUCTS_STORAGE_KEY, []));
-      setOrders(getLocalStorageItem<Order[]>(ORDERS_STORAGE_KEY, []));
+      const loadedOrders = getLocalStorageItem<Order[]>(ORDERS_STORAGE_KEY, []);
+      setOrders(loadedOrders);
     } catch (error) {
       console.error("Error loading data from localStorage:", error);
       toast({ title: "Load Error", description: "Could not load saved data. Starting fresh.", variant: "destructive"});
-      // Optionally clear corrupted keys
-      // window.localStorage.removeItem(PRODUCTS_STORAGE_KEY);
-      // window.localStorage.removeItem(ORDERS_STORAGE_KEY);
     }
-  }, [toast]); // Added toast to dependency array
+  }, [toast]);
+
+  useEffect(() => {
+    if (isClient && orders.length > 0 && !initialAgedOrderCheckDone) {
+      const now = Date.now();
+      orders.forEach(order => {
+        try {
+          const orderTimestamp = new Date(order.orderDate).getTime();
+          if (now - orderTimestamp > TWENTY_FOUR_HOURS_MS) {
+            toast({
+              title: "Aged Order Alert",
+              description: `Order for ${order.customerName} (ID: ...${order.id.slice(-6)}) placed on ${format(new Date(order.orderDate), "MMM d, yyyy 'at' h:mm a")} is older than 24 hours.`,
+              variant: "default", 
+              duration: 7000, // Keep notification for 7 seconds
+            });
+          }
+        } catch (e) {
+            console.error("Error parsing order date for aged check:", e, order.orderDate);
+        }
+      });
+      setInitialAgedOrderCheckDone(true);
+    }
+  }, [orders, isClient, initialAgedOrderCheckDone, toast]);
+
 
   useEffect(() => {
     if(isClient) setLocalStorageItem(PRODUCTS_STORAGE_KEY, products);
@@ -47,8 +71,8 @@ export default function OrderFlowApp() {
     if(isClient) setLocalStorageItem(ORDERS_STORAGE_KEY, orders);
   }, [orders, isClient]);
 
-  const handleAddProduct = useCallback((productData: Omit<Product, 'id'>) => {
-    setProducts(prev => [...prev, { ...productData, id: crypto.randomUUID() }]);
+  const handleAddProduct = useCallback((productData: Omit<Product, 'id' | 'category'> & { category?: string }) => {
+    setProducts(prev => [...prev, { ...productData, id: crypto.randomUUID(), category: productData.category || '' }]);
   }, []);
 
   const handleUpdateProduct = useCallback((updatedProduct: Product) => {
@@ -57,28 +81,25 @@ export default function OrderFlowApp() {
 
   const handleDeleteProduct = useCallback((productId: string) => {
     setProducts(prev => prev.filter(p => p.id !== productId));
+    // Also remove from current order if it exists there (edge case, but good to handle)
+    setCurrentOrderItems(prevItems => prevItems.filter(item => item.productId !== productId));
   }, []);
 
-  const handleAddItemToOrder = useCallback(({ productId, quantity }: { productId: string; quantity: number; }) => {
-    const product = products.find(p => p.id === productId);
-    if (!product) {
-      toast({ title: "Error", description: "Product not found.", variant: "destructive" });
-      return;
-    }
-
+  // Now accepts a full OrderItem
+  const handleAddItemToOrder = useCallback((newItem: OrderItem) => {
     setCurrentOrderItems(prevItems => {
-      const existingItemIndex = prevItems.findIndex(item => item.productId === productId);
+      const existingItemIndex = prevItems.findIndex(item => item.productId === newItem.productId);
       if (existingItemIndex > -1) {
         const updatedItems = [...prevItems];
-        updatedItems[existingItemIndex].quantity += quantity;
-        toast({ title: "Quantity Updated", description: `${product.name} quantity increased to ${updatedItems[existingItemIndex].quantity}.` });
+        updatedItems[existingItemIndex].quantity += newItem.quantity;
+        toast({ title: "Quantity Updated", description: `${newItem.productName} quantity increased to ${updatedItems[existingItemIndex].quantity}.` });
         return updatedItems;
       } else {
-        toast({ title: "Item Added", description: `${product.name} (x${quantity}) added to order.` });
-        return [...prevItems, { productId, productName: product.name, quantity, price: product.price }];
+        toast({ title: "Item Added", description: `${newItem.productName} (x${newItem.quantity}) added to order.` });
+        return [...prevItems, newItem];
       }
     });
-  }, [products, toast]);
+  }, [toast]);
 
   const handleUpdateItemQuantity = useCallback((productId: string, quantity: number) => {
     setCurrentOrderItems(prevItems => 
@@ -110,7 +131,7 @@ export default function OrderFlowApp() {
        return;
     }
     setIsSavingOrder(true);
-    await new Promise(resolve => setTimeout(resolve, 300)); // Simulate API call delay
+    await new Promise(resolve => setTimeout(resolve, 300)); 
 
     const newOrder: Order = {
       id: crypto.randomUUID(),
@@ -119,7 +140,7 @@ export default function OrderFlowApp() {
       totalAmount: currentOrderTotal,
       orderDate: new Date().toISOString(),
     };
-    setOrders(prevOrders => [newOrder, ...prevOrders]);
+    setOrders(prevOrders => [newOrder, ...prevOrders].sort((a,b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime()));
     setCurrentOrderItems([]);
     setCurrentCustomerName('');
     setIsSavingOrder(false);
@@ -149,7 +170,7 @@ export default function OrderFlowApp() {
               <ShoppingCart className="mr-2 h-4 w-4" /> Create Order
             </TabsTrigger>
             <TabsTrigger value="manage-products" className="py-2 sm:py-1.5 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md">
-              <PackagePlus className="mr-2 h-4 w-4" /> Manage Products
+              <PackageSearch className="mr-2 h-4 w-4" /> Manage Products
             </TabsTrigger>
             <TabsTrigger value="past-orders" className="py-2 sm:py-1.5 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md">
               <HistoryIcon className="mr-2 h-4 w-4" /> Past Orders
