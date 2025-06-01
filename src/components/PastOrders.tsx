@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
+import { Label } from "@/components/ui/label"; // Added import
 import { format, isValid, parseISO } from "date-fns";
 import { Calendar as CalendarIcon, Filter, XCircle, History, PackageOpen } from 'lucide-react';
 import { cn } from "@/lib/utils";
