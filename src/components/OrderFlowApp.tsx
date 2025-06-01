@@ -8,10 +8,11 @@ import Header from '@/components/Header';
 import ProductManagement from '@/components/ProductManagement';
 import OrderCreation from '@/components/OrderCreation';
 import PastOrders from '@/components/PastOrders';
+import DeliveryConfirmationDialog from '@/components/DeliveryConfirmationDialog'; // New Import
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'; // Removed CardFooter
-import { ShoppingCart, PackageSearch, HistoryIcon, UserCircle, WorkflowIcon, CheckCircle2, Trash2 } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ShoppingCart, PackageSearch, HistoryIcon, UserCircle, WorkflowIcon, CheckCircle2, Trash2, Edit } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import { format } from 'date-fns';
 
@@ -19,8 +20,8 @@ const PRODUCTS_STORAGE_KEY = 'orderflow-products';
 const ORDERS_STORAGE_KEY = 'orderflow-orders';
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 
-interface PendingOrder {
-  id: string; // Temporary client-side ID
+export interface PendingOrder { // Exporting for use in dialog
+  id: string;
   customerName: string;
   items: OrderItem[];
   totalAmount: number;
@@ -32,11 +33,14 @@ export default function OrderFlowApp() {
   const [orders, setOrders] = useState<Order[]>([]);
   
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
-  const [stagedItems, setStagedItems] = useState<OrderItem[]>([]); // Staged items in OrderCreation, passed down
-
-  const [isSavingOrder, setIsSavingOrder] = useState<string | null>(null); // Store ID of order being saved
+  
   const [isClient, setIsClient] = useState(false);
   const [initialAgedOrderCheckDone, setInitialAgedOrderCheckDone] = useState(false);
+
+  // State for Delivery Confirmation Dialog
+  const [isDeliveryDialogOpen, setIsDeliveryDialogOpen] = useState(false);
+  const [selectedPendingOrderForDialog, setSelectedPendingOrderForDialog] = useState<PendingOrder | null>(null);
+
 
   useEffect(() => {
     setIsClient(true);
@@ -82,19 +86,18 @@ export default function OrderFlowApp() {
 
   const handleAddProduct = useCallback((productData: Omit<Product, 'id' | 'category'> & { category?: string }) => {
     setProducts(prev => [...prev, { ...productData, id: crypto.randomUUID(), category: productData.category || '' }]);
-    toast({ title: "Product Added", description: `${productData.name} has been added to the catalog.`});
-  }, [toast]);
+    // Toast is handled in ProductManagement
+  }, []);
 
   const handleUpdateProduct = useCallback((updatedProduct: Product) => {
     setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
-    toast({ title: "Product Updated", description: `${updatedProduct.name} has been updated.`});
-  }, [toast]);
+    // Toast is handled in ProductManagement
+  }, []);
 
   const handleDeleteProduct = useCallback((productId: string) => {
-    const product = products.find(p => p.id === productId);
+    // Toast is handled in ProductManagement before calling this
     setProducts(prev => prev.filter(p => p.id !== productId));
-    toast({ title: "Product Deleted", description: `${product?.name || 'Product'} has been deleted.`, variant: "destructive" });
-  }, [products, toast]);
+  }, []);
 
   const handleAddItemsToPendingList = useCallback((customerName: string, itemsToAdd: OrderItem[]) => {
     if (!customerName.trim()) {
@@ -108,29 +111,30 @@ export default function OrderFlowApp() {
 
     const totalAmount = itemsToAdd.reduce((total, item) => total + (item.price * item.quantity), 0);
     const newPendingOrder: PendingOrder = {
-      id: crypto.randomUUID(), // Temporary ID for client-side management
+      id: crypto.randomUUID(), 
       customerName,
       items: itemsToAdd,
       totalAmount,
     };
 
     setPendingOrders(prev => [...prev, newPendingOrder]);
-    setStagedItems([]); // Clear staged items in OrderCreation by re-passing empty array (or allow OrderCreation to clear itself)
-    toast({ title: "Order Staged", description: `Order for ${customerName} with ${itemsToAdd.length} item type(s) added to pending list.` });
+    toast({ title: "Order Batch Added to Queue", description: `Batch for ${customerName} with ${itemsToAdd.length} item type(s) added to pending orders queue.` });
   }, [toast]);
   
-  const handleSavePendingOrder = useCallback(async (pendingOrderId: string) => {
+  const handleOpenDeliveryDialog = (pendingOrder: PendingOrder) => {
+    setSelectedPendingOrderForDialog(pendingOrder);
+    setIsDeliveryDialogOpen(true);
+  };
+
+  const handleConfirmFullDelivery = useCallback((pendingOrderId: string) => {
     const orderToSave = pendingOrders.find(po => po.id === pendingOrderId);
     if (!orderToSave) {
       toast({ title: "Error", description: "Could not find the order to save.", variant: "destructive" });
       return;
     }
 
-    setIsSavingOrder(pendingOrderId);
-    await new Promise(resolve => setTimeout(resolve, 300)); // Simulate async save
-
     const newOrder: Order = {
-      id: crypto.randomUUID(), // Generate new permanent ID
+      id: crypto.randomUUID(),
       customerName: orderToSave.customerName,
       items: orderToSave.items,
       totalAmount: orderToSave.totalAmount,
@@ -139,16 +143,33 @@ export default function OrderFlowApp() {
     setOrders(prevOrders => [newOrder, ...prevOrders].sort((a,b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime()));
     setPendingOrders(prev => prev.filter(po => po.id !== pendingOrderId));
     
-    setIsSavingOrder(null);
-    toast({ title: "Order Saved!", description: `Order for ${newOrder.customerName} has been successfully saved.` });
-    
+    toast({ title: "Order Fully Delivered!", description: `Order for ${newOrder.customerName} marked as delivered and saved to past orders.` });
+    setSelectedPendingOrderForDialog(null);
   }, [pendingOrders, toast]);
+
+  const handleUpdatePendingOrderQuantities = useCallback((pendingOrderId: string, updatedItems: OrderItem[]) => {
+    setPendingOrders(prev => {
+      return prev.map(po => {
+        if (po.id === pendingOrderId) {
+          if (updatedItems.length === 0) { // All items were set to 0 quantity
+            return null; // Mark for removal
+          }
+          const newTotalAmount = updatedItems.reduce((total, item) => total + (item.price * item.quantity), 0);
+          return { ...po, items: updatedItems, totalAmount: newTotalAmount };
+        }
+        return po;
+      }).filter(Boolean) as PendingOrder[]; // Filter out nulls and assert type
+    });
+    // Toast is handled in the dialog based on outcome
+    setSelectedPendingOrderForDialog(null);
+  }, []);
+
 
   const handleRemovePendingOrder = useCallback((pendingOrderId: string) => {
     const orderToRemove = pendingOrders.find(po => po.id === pendingOrderId);
     setPendingOrders(prev => prev.filter(po => po.id !== pendingOrderId));
     if (orderToRemove) {
-        toast({ title: "Pending Order Removed", description: `Pending order for ${orderToRemove.customerName} has been removed.`, variant: "destructive" });
+        toast({ title: "Pending Order Removed", description: `Pending order for ${orderToRemove.customerName} has been removed from the queue.`, variant: "destructive" });
     }
   }, [pendingOrders, toast]);
 
@@ -196,12 +217,11 @@ export default function OrderFlowApp() {
                         <CardHeader>
                           <div className="flex justify-between items-center">
                             <CardTitle className="text-lg text-primary">{pendingOrder.customerName}</CardTitle>
-                            <Button 
+                             <Button 
                                 variant="ghost" 
                                 size="icon" 
                                 onClick={() => handleRemovePendingOrder(pendingOrder.id)}
                                 className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 w-8"
-                                disabled={isSavingOrder === pendingOrder.id}
                             >
                                 <Trash2 className="h-4 w-4" />
                                 <span className="sr-only">Remove Pending Order</span>
@@ -209,23 +229,24 @@ export default function OrderFlowApp() {
                           </div>
                         </CardHeader>
                         <CardContent>
-                          <ul className="space-y-1 text-sm border p-3 rounded-md bg-background">
+                          <ul className="space-y-1 text-sm border p-3 rounded-md bg-background mb-3">
                             {pendingOrder.items.map(item => (
                               <li key={item.productId} className="flex justify-between">
                                 <span>{item.productName} (x{item.quantity})</span>
                                 <span>${(item.price * item.quantity).toFixed(2)}</span>
                               </li>
                             ))}
+                             {pendingOrder.items.length === 0 && <li className="text-muted-foreground text-center">No items pending for this order.</li>}
                           </ul>
                           <div className="flex justify-between items-center mt-3 pt-3 border-t">
                             <p className="font-semibold text-lg">Subtotal: <span className="text-primary">${pendingOrder.totalAmount.toFixed(2)}</span></p>
                             <Button 
-                              onClick={() => handleSavePendingOrder(pendingOrder.id)} 
-                              size="default" 
-                              disabled={isSavingOrder === pendingOrder.id || (isSavingOrder !== null && isSavingOrder !== pendingOrder.id)}
+                              onClick={() => handleOpenDeliveryDialog(pendingOrder)} 
+                              size="default"
+                              disabled={pendingOrder.items.length === 0} // Disable if no items to process
                             >
-                              <CheckCircle2 className="mr-2 h-5 w-5" /> 
-                              {isSavingOrder === pendingOrder.id ? 'Saving...' : 'Save This Order'}
+                              <Edit className="mr-2 h-5 w-5" /> 
+                              Process Delivery
                             </Button>
                           </div>
                         </CardContent>
@@ -233,17 +254,14 @@ export default function OrderFlowApp() {
                     ))}
                   </div>
                 ) : (
-                    <p className="text-muted-foreground text-sm text-center py-4 bg-muted/30 rounded-md">No orders currently pending. Use "Stage & Add Items" below to create new pending orders.</p>
+                    <p className="text-muted-foreground text-sm text-center py-4 bg-muted/30 rounded-md">No orders currently pending. Use "Create Item Batch" below to add new orders to the queue.</p>
                 )}
               </CardContent>
-              {/* CardFooter removed as save actions are now per pending order */}
             </Card>
 
             <OrderCreation
               products={products}
-              onAddItemsToPendingList={handleAddItemsToPendingList} // Renamed prop
-              // stagedItems is managed internally by OrderCreation now, or passed for its initial state
-              // setStagedItems is managed internally by OrderCreation now
+              onAddItemsToPendingList={handleAddItemsToPendingList}
             />
           </TabsContent>
           <TabsContent value="manage-products" className="mt-0">
@@ -260,8 +278,15 @@ export default function OrderFlowApp() {
         </Tabs>
       </main>
       <footer className="text-center p-4 text-xs text-muted-foreground border-t mt-8">
-        OrderFlow &copy; {new Date().getFullYear()}
+        Orderly &copy; {new Date().getFullYear()}
       </footer>
+      <DeliveryConfirmationDialog
+        isOpen={isDeliveryDialogOpen}
+        onOpenChange={setIsDeliveryDialogOpen}
+        order={selectedPendingOrderForDialog}
+        onConfirmFullDelivery={handleConfirmFullDelivery}
+        onUpdatePendingQuantities={handleUpdatePendingOrderQuantities}
+      />
     </div>
   );
 }

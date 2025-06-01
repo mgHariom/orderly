@@ -74,7 +74,7 @@ export default function OrderCreation({
     }
   };
 
-  const handleAddAllStagedToPendingList = () => {
+  const handleAddBatchToPendingList = () => {
     if (!currentCustomerName.trim()) {
       toast({ title: "Customer Name Missing", description: "Please enter a customer name before adding the batch to the pending list.", variant: "destructive" });
       return;
@@ -84,9 +84,10 @@ export default function OrderCreation({
       return;
     }
     onAddItemsToPendingList(currentCustomerName, stagedItems);
+    const customerForToast = currentCustomerName; // Capture before reset
     setCurrentCustomerName('');
     setStagedItems([]);
-    toast({ title: "Batch Added to Queue", description: `Batch for ${currentCustomerName} sent to pending orders queue. Ready for next customer.` });
+    toast({ title: "Batch Added to Queue", description: `Batch for ${customerForToast} sent to pending orders queue. Ready for next customer.` });
   };
 
   const canDecreaseStagedQuantity = (productId: string) => {
@@ -107,7 +108,7 @@ export default function OrderCreation({
         <div className="space-y-4 p-4 border rounded-md bg-card shadow-sm">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
             <div className="md:col-span-3">
-              <Label htmlFor="customerNameStaging">Customer Name</Label>
+              <Label htmlFor="customerNameStaging">Customer Name for this Batch</Label>
               <Input
                   id="customerNameStaging"
                   placeholder="Enter customer name for this batch"
@@ -183,7 +184,7 @@ export default function OrderCreation({
             </div>
             <div className="flex flex-col sm:flex-row items-center justify-between mt-4 space-y-2 sm:space-y-0">
                 <p className="text-xl font-semibold">Batch Total for {currentCustomerName || "..."}: <span className="text-accent">${stagedItemsTotal.toFixed(2)}</span></p>
-                <Button onClick={handleAddAllStagedToPendingList} size="lg" disabled={stagedItems.length === 0 || !currentCustomerName.trim()}>
+                <Button onClick={handleAddBatchToPendingList} size="lg" disabled={stagedItems.length === 0 || !currentCustomerName.trim()}>
                     <ListChecks className="mr-2 h-5 w-5" /> Add This Batch to Pending Orders Queue
                 </Button>
             </div>
