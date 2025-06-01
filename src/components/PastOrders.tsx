@@ -10,9 +10,10 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { Label } from "@/components/ui/label";
-import { format, isValid, parseISO } from "date-fns";
+import { format, isValid, parseISO, isDate } from "date-fns"; // Added isDate
 import { Calendar as CalendarIcon, XCircle, History, PackageOpen } from 'lucide-react';
 import { cn } from "@/lib/utils";
+import type { Timestamp } from 'firebase/firestore';
 
 interface PastOrdersProps {
   orders: Order[];
@@ -21,60 +22,75 @@ interface PastOrdersProps {
 export default function PastOrders({ orders }: PastOrdersProps) {
   const [filterCustomer, setFilterCustomer] = useState('');
   const [filterDate, setFilterDate] = useState<Date | undefined>(undefined);
-  const [isClient, setIsClient] = useState(false);
-
-  useEffect(() => {
-    setIsClient(true);
-  }, []);
 
   const filteredOrders = useMemo(() => {
-    if (!isClient) return [];
     return orders.filter(order => {
       const customerMatch = filterCustomer ? order.customerName.toLowerCase().includes(filterCustomer.toLowerCase()) : true;
+      
       let dateMatch = true;
       if (filterDate) {
         try {
-          const orderDateParsed = parseISO(order.orderDate);
-          if (isValid(orderDateParsed)) {
-            dateMatch = format(orderDateParsed, 'yyyy-MM-dd') === format(filterDate, 'yyyy-MM-dd');
+          // order.orderDate can be Date or Firestore Timestamp from the hook, or string initially
+          let orderDateToCompare: Date;
+          if (isDate(order.orderDate)) {
+            orderDateToCompare = order.orderDate as Date;
+          } else if (order.orderDate && typeof (order.orderDate as Timestamp).toDate === 'function') {
+             orderDateToCompare = (order.orderDate as Timestamp).toDate();
+          } else if (typeof order.orderDate === 'string') {
+            orderDateToCompare = parseISO(order.orderDate as string);
+          } else {
+             // If it's an unrecognized format, assume it doesn't match or handle as error
+             dateMatch = false;
+             return customerMatch && dateMatch;
+          }
+
+          if (isValid(orderDateToCompare)) {
+            dateMatch = format(orderDateToCompare, 'yyyy-MM-dd') === format(filterDate, 'yyyy-MM-dd');
           } else {
             dateMatch = false; 
           }
         } catch (e) {
+          console.error("Error parsing order date for filtering:", e, order.orderDate);
           dateMatch = false; 
         }
       }
       return customerMatch && dateMatch;
     }).sort((a,b) => {
         try {
-            return parseISO(b.orderDate).getTime() - parseISO(a.orderDate).getTime();
+            const dateA = isDate(a.orderDate) ? (a.orderDate as Date) : ((a.orderDate as Timestamp)?.toDate ? (a.orderDate as Timestamp).toDate() : parseISO(a.orderDate as string));
+            const dateB = isDate(b.orderDate) ? (b.orderDate as Date) : ((b.orderDate as Timestamp)?.toDate ? (b.orderDate as Timestamp).toDate() : parseISO(b.orderDate as string));
+            return dateB.getTime() - dateA.getTime();
         } catch (e) {
             return 0;
         }
     });
-  }, [orders, filterCustomer, filterDate, isClient]);
+  }, [orders, filterCustomer, filterDate]);
 
   const clearFilters = () => {
     setFilterCustomer('');
     setFilterDate(undefined);
   };
   
-  if (!isClient) {
-     return (
-      <Card className="shadow-lg">
-        <CardHeader>
-          <CardTitle className="font-headline flex items-center"><History className="mr-2 h-5 w-5" /> Past Orders</CardTitle>
-          <CardDescription>Loading order history...</CardDescription>
-        </CardHeader>
-        <CardContent>
-            <div className="text-center py-10 text-muted-foreground">
-                <PackageOpen className="mx-auto h-12 w-12 mb-2" />
-                <p>Loading orders...</p>
-            </div>
-        </CardContent>
-      </Card>
-     );
-  }
+  const getDisplayDate = (orderDateValue: Date | Timestamp | string): string => {
+    try {
+      if (isDate(orderDateValue)) {
+        return format(orderDateValue as Date, "MMM d, yyyy - h:mm a");
+      }
+      if (orderDateValue && typeof (orderDateValue as Timestamp).toDate === 'function') {
+        return format((orderDateValue as Timestamp).toDate(), "MMM d, yyyy - h:mm a");
+      }
+      if (typeof orderDateValue === 'string') {
+        const parsed = parseISO(orderDateValue);
+        if (isValid(parsed)) {
+          return format(parsed, "MMM d, yyyy - h:mm a");
+        }
+      }
+      return 'Invalid Date';
+    } catch (e) {
+      return 'Invalid Date';
+    }
+  };
+
 
   return (
     <Card className="shadow-lg">
@@ -144,7 +160,7 @@ export default function PastOrders({ orders }: PastOrdersProps) {
                   <div className="flex flex-col sm:flex-row justify-between w-full sm:items-center gap-1 sm:gap-2">
                     <span className="font-medium text-primary text-base">{order.customerName}</span>
                     <span className="text-xs sm:text-sm text-muted-foreground">
-                      {isValid(parseISO(order.orderDate)) ? format(parseISO(order.orderDate), "MMM d, yyyy - h:mm a") : 'Invalid Date'}
+                      {getDisplayDate(order.orderDate)}
                     </span>
                   </div>
                 </AccordionTrigger>

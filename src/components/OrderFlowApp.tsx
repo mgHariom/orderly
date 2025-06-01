@@ -1,69 +1,47 @@
 
 "use client";
 
-import type { Product, OrderItem, Order } from '@/lib/types';
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { getLocalStorageItem, setLocalStorageItem } from '@/lib/localStorage';
+import type { Product, OrderItem, PendingOrder as PendingOrderType, Order as OrderType } from '@/lib/types';
+import { useState, useEffect, useCallback } from 'react';
+import { useProducts } from '@/hooks/useProducts';
+import { usePendingOrders } from '@/hooks/usePendingOrders';
+import { useOrders } from '@/hooks/useOrders';
 import Header from '@/components/Header';
 import ProductManagement from '@/components/ProductManagement';
 import OrderCreation from '@/components/OrderCreation';
 import PastOrders from '@/components/PastOrders';
-import DeliveryConfirmationDialog from '@/components/DeliveryConfirmationDialog'; // New Import
+import DeliveryConfirmationDialog from '@/components/DeliveryConfirmationDialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ShoppingCart, PackageSearch, HistoryIcon, UserCircle, WorkflowIcon, CheckCircle2, Trash2, Edit } from 'lucide-react';
+import { ShoppingCart, PackageSearch, HistoryIcon, UserCircle, WorkflowIcon, Trash2, Edit, Loader2 } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
-import { format } from 'date-fns';
+import { format, Timestamp } from 'date-fns';
 
-const PRODUCTS_STORAGE_KEY = 'orderflow-products';
-const ORDERS_STORAGE_KEY = 'orderflow-orders';
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
-
-export interface PendingOrder { // Exporting for use in dialog
-  id: string;
-  customerName: string;
-  items: OrderItem[];
-  totalAmount: number;
-}
 
 export default function OrderFlowApp() {
   const { toast } = useToast();
-  const [products, setProducts] = useState<Product[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
+
+  const { products, isLoadingProducts, addProduct, updateProduct, deleteProduct } = useProducts();
+  const { pendingOrders, isLoadingPendingOrders, addPendingOrder, updatePendingOrder, deletePendingOrder } = usePendingOrders();
+  const { orders, isLoadingOrders, addOrder } = useOrders();
   
-  const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
-  
-  const [isClient, setIsClient] = useState(false);
   const [initialAgedOrderCheckDone, setInitialAgedOrderCheckDone] = useState(false);
-
-  // State for Delivery Confirmation Dialog
   const [isDeliveryDialogOpen, setIsDeliveryDialogOpen] = useState(false);
-  const [selectedPendingOrderForDialog, setSelectedPendingOrderForDialog] = useState<PendingOrder | null>(null);
-
-
-  useEffect(() => {
-    setIsClient(true);
-    try {
-      setProducts(getLocalStorageItem<Product[]>(PRODUCTS_STORAGE_KEY, []));
-      const loadedOrders = getLocalStorageItem<Order[]>(ORDERS_STORAGE_KEY, []);
-      setOrders(loadedOrders);
-    } catch (error) {
-      console.error("Error loading data from localStorage:", error);
-      toast({ title: "Load Error", description: "Could not load saved data. Starting fresh.", variant: "destructive"});
-    }
-  }, [toast]);
+  const [selectedPendingOrderForDialog, setSelectedPendingOrderForDialog] = useState<PendingOrderType | null>(null);
 
   useEffect(() => {
-    if (isClient && orders.length > 0 && !initialAgedOrderCheckDone) {
+    if (!isLoadingOrders && orders.length > 0 && !initialAgedOrderCheckDone) {
       const now = Date.now();
       orders.forEach(order => {
         try {
-          const orderTimestamp = new Date(order.orderDate).getTime();
-          if (now - orderTimestamp > TWENTY_FOUR_HOURS_MS) {
+          // Ensure orderDate is a JS Date object for comparison
+          const orderDate = order.orderDate instanceof Date ? order.orderDate : (order.orderDate as any).toDate();
+          if (now - orderDate.getTime() > TWENTY_FOUR_HOURS_MS) {
             toast({
               title: "Aged Order Alert",
-              description: `Order for ${order.customerName} (ID: ...${order.id.slice(-6)}) placed on ${format(new Date(order.orderDate), "MMM d, yyyy 'at' h:mm a")} is older than 24 hours.`,
+              description: `Order for ${order.customerName} (ID: ...${order.id.slice(-6)}) placed on ${format(orderDate, "MMM d, yyyy 'at' h:mm a")} is older than 24 hours.`,
               variant: "default", 
               duration: 7000, 
             });
@@ -74,34 +52,38 @@ export default function OrderFlowApp() {
       });
       setInitialAgedOrderCheckDone(true);
     }
-  }, [orders, isClient, initialAgedOrderCheckDone, toast]);
+  }, [orders, isLoadingOrders, initialAgedOrderCheckDone, toast]);
 
-  useEffect(() => {
-    if(isClient) setLocalStorageItem(PRODUCTS_STORAGE_KEY, products);
-  }, [products, isClient]);
+  const handleAddProduct = useCallback(async (productData: Omit<Product, 'id' | 'category'> & { category?: string }) => {
+    try {
+      await addProduct({ ...productData, category: productData.category || '' });
+      // Toast is handled in useProducts hook
+    } catch (error) {
+      console.error("Failed to add product:", error);
+    }
+  }, [addProduct]);
 
-  useEffect(() => {
-    if(isClient) setLocalStorageItem(ORDERS_STORAGE_KEY, orders);
-  }, [orders, isClient]);
+  const handleUpdateProduct = useCallback(async (updatedProduct: Product) => {
+    try {
+      await updateProduct(updatedProduct);
+      // Toast is handled in useProducts hook
+    } catch (error) {
+      console.error("Failed to update product:", error);
+    }
+  }, [updateProduct]);
 
-  const handleAddProduct = useCallback((productData: Omit<Product, 'id' | 'category'> & { category?: string }) => {
-    setProducts(prev => [...prev, { ...productData, id: crypto.randomUUID(), category: productData.category || '' }]);
-    // Toast is handled in ProductManagement
-  }, []);
+  const handleDeleteProduct = useCallback(async (productId: string) => {
+    try {
+      await deleteProduct(productId);
+      // Toast is handled in useProducts hook
+    } catch (error) {
+      console.error("Failed to delete product:", error);
+    }
+  }, [deleteProduct]);
 
-  const handleUpdateProduct = useCallback((updatedProduct: Product) => {
-    setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
-    // Toast is handled in ProductManagement
-  }, []);
-
-  const handleDeleteProduct = useCallback((productId: string) => {
-    // Toast is handled in ProductManagement before calling this
-    setProducts(prev => prev.filter(p => p.id !== productId));
-  }, []);
-
-  const handleAddItemsToPendingList = useCallback((customerName: string, itemsToAdd: OrderItem[]) => {
+  const handleAddItemsToPendingList = useCallback(async (customerName: string, itemsToAdd: OrderItem[]) => {
     if (!customerName.trim()) {
-      toast({ title: "Customer Name Required", description: "Please ensure a customer name is set in the staging area.", variant: "destructive" });
+      toast({ title: "Customer Name Required", description: "Please ensure a customer name is set.", variant: "destructive" });
       return;
     }
     if (itemsToAdd.length === 0) {
@@ -110,77 +92,89 @@ export default function OrderFlowApp() {
     }
 
     const totalAmount = itemsToAdd.reduce((total, item) => total + (item.price * item.quantity), 0);
-    const newPendingOrder: PendingOrder = {
-      id: crypto.randomUUID(), 
-      customerName,
-      items: itemsToAdd,
-      totalAmount,
-    };
-
-    setPendingOrders(prev => [...prev, newPendingOrder]);
-    toast({ title: "Order Batch Added to Queue", description: `Batch for ${customerName} with ${itemsToAdd.length} item type(s) added to pending orders queue.` });
-  }, [toast]);
+    try {
+      await addPendingOrder({
+        customerName,
+        items: itemsToAdd,
+        totalAmount,
+      });
+      // Toast is handled in usePendingOrders hook
+    } catch (error) {
+      console.error("Failed to add to pending list:", error);
+    }
+  }, [addPendingOrder, toast]);
   
-  const handleOpenDeliveryDialog = (pendingOrder: PendingOrder) => {
+  const handleOpenDeliveryDialog = (pendingOrder: PendingOrderType) => {
     setSelectedPendingOrderForDialog(pendingOrder);
     setIsDeliveryDialogOpen(true);
   };
 
-  const handleConfirmFullDelivery = useCallback((pendingOrderId: string) => {
+  const handleConfirmFullDelivery = useCallback(async (pendingOrderId: string) => {
     const orderToSave = pendingOrders.find(po => po.id === pendingOrderId);
     if (!orderToSave) {
       toast({ title: "Error", description: "Could not find the order to save.", variant: "destructive" });
       return;
     }
 
-    const newOrder: Order = {
-      id: crypto.randomUUID(),
-      customerName: orderToSave.customerName,
-      items: orderToSave.items,
-      totalAmount: orderToSave.totalAmount,
-      orderDate: new Date().toISOString(),
-    };
-    setOrders(prevOrders => [newOrder, ...prevOrders].sort((a,b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime()));
-    setPendingOrders(prev => prev.filter(po => po.id !== pendingOrderId));
-    
-    toast({ title: "Order Fully Delivered!", description: `Order for ${newOrder.customerName} marked as delivered and saved to past orders.` });
-    setSelectedPendingOrderForDialog(null);
-  }, [pendingOrders, toast]);
-
-  const handleUpdatePendingOrderQuantities = useCallback((pendingOrderId: string, updatedItems: OrderItem[]) => {
-    setPendingOrders(prev => {
-      return prev.map(po => {
-        if (po.id === pendingOrderId) {
-          if (updatedItems.length === 0) { // All items were set to 0 quantity
-            return null; // Mark for removal
-          }
-          const newTotalAmount = updatedItems.reduce((total, item) => total + (item.price * item.quantity), 0);
-          return { ...po, items: updatedItems, totalAmount: newTotalAmount };
-        }
-        return po;
-      }).filter(Boolean) as PendingOrder[]; // Filter out nulls and assert type
-    });
-    // Toast is handled in the dialog based on outcome
-    setSelectedPendingOrderForDialog(null);
-  }, []);
-
-
-  const handleRemovePendingOrder = useCallback((pendingOrderId: string) => {
-    const orderToRemove = pendingOrders.find(po => po.id === pendingOrderId);
-    setPendingOrders(prev => prev.filter(po => po.id !== pendingOrderId));
-    if (orderToRemove) {
-        toast({ title: "Pending Order Removed", description: `Pending order for ${orderToRemove.customerName} has been removed from the queue.`, variant: "destructive" });
+    try {
+      await addOrder({
+        customerName: orderToSave.customerName,
+        items: orderToSave.items,
+        totalAmount: orderToSave.totalAmount,
+        // category determination (if any) would go here
+      });
+      await deletePendingOrder(pendingOrderId);
+      
+      toast({ title: "Order Fully Delivered!", description: `Order for ${orderToSave.customerName} marked as delivered and saved to past orders.` });
+      setSelectedPendingOrderForDialog(null);
+    } catch (error) {
+      console.error("Error confirming full delivery:", error);
+      toast({ title: "Delivery Error", description: "Could not confirm full delivery.", variant: "destructive" });
     }
-  }, [pendingOrders, toast]);
+  }, [pendingOrders, addOrder, deletePendingOrder, toast]);
 
+  const handleUpdatePendingOrderQuantities = useCallback(async (pendingOrderId: string, updatedItems: OrderItem[]) => {
+    const orderToUpdate = pendingOrders.find(po => po.id === pendingOrderId);
+    if (!orderToUpdate) return;
 
-  if (!isClient) {
+    try {
+      if (updatedItems.length === 0) { // All items were set to 0 quantity
+        await deletePendingOrder(pendingOrderId);
+        toast({
+            title: "Order Cleared",
+            description: `All items in ${orderToUpdate.customerName}'s order were set to 0 pending. The order has been cleared from the queue.`,
+        });
+      } else {
+        const newTotalAmount = updatedItems.reduce((total, item) => total + (item.price * item.quantity), 0);
+        await updatePendingOrder({ id: pendingOrderId, items: updatedItems, totalAmount: newTotalAmount });
+         // Toast is handled in DeliveryConfirmationDialog for this case
+      }
+      setSelectedPendingOrderForDialog(null);
+    } catch (error) {
+      console.error("Error updating pending quantities:", error);
+      toast({ title: "Update Error", description: "Could not update pending quantities.", variant: "destructive" });
+    }
+  }, [pendingOrders, updatePendingOrder, deletePendingOrder, toast]);
+
+  const handleRemovePendingOrder = useCallback(async (pendingOrderId: string) => {
+    const orderToRemove = pendingOrders.find(po => po.id === pendingOrderId);
+    if (!orderToRemove) return;
+    try {
+      await deletePendingOrder(pendingOrderId);
+      toast({ title: "Pending Order Removed", description: `Pending order for ${orderToRemove.customerName} has been removed.`, variant: "destructive" });
+    } catch (error) {
+      console.error("Error removing pending order:", error);
+      toast({ title: "Removal Error", description: "Could not remove pending order.", variant: "destructive" });
+    }
+  }, [pendingOrders, deletePendingOrder, toast]);
+
+  if (isLoadingProducts || isLoadingPendingOrders || isLoadingOrders) {
     return (
       <div className="flex flex-col min-h-screen bg-background">
         <Header />
         <div className="flex-grow container mx-auto px-4 py-8 text-center flex flex-col items-center justify-center">
-          <WorkflowIcon className="h-16 w-16 text-primary mb-4 animate-pulse" />
-          <p className="text-xl text-muted-foreground font-medium">Loading OrderFlow...</p>
+          <Loader2 className="h-16 w-16 text-primary mb-4 animate-spin" />
+          <p className="text-xl text-muted-foreground font-medium">Loading OrderFlow Data...</p>
           <p className="text-sm text-muted-foreground">Please wait a moment.</p>
         </div>
       </div>
@@ -243,7 +237,7 @@ export default function OrderFlowApp() {
                             <Button 
                               onClick={() => handleOpenDeliveryDialog(pendingOrder)} 
                               size="default"
-                              disabled={pendingOrder.items.length === 0} // Disable if no items to process
+                              disabled={pendingOrder.items.length === 0}
                             >
                               <Edit className="mr-2 h-5 w-5" /> 
                               Process Delivery

@@ -1,6 +1,8 @@
 
+import type { Timestamp } from 'firebase/firestore';
+
 export interface Product {
-  id: string;
+  id: string; // Firestore document ID
   name: string;
   price: number;
   description?: string;
@@ -14,19 +16,20 @@ export interface OrderItem {
   price: number;
 }
 
-export interface PendingOrder { // This interface might be identical to Order, but represents a different stage
-  id: string; // Temporary client-side ID for pending orders
+export interface PendingOrder {
+  id: string; // Firestore document ID
   customerName: string;
   items: OrderItem[];
   totalAmount: number;
-  // Potentially add status fields here later if needed, e.g., 'pending_delivery', 'partially_delivered'
+  createdAt: Timestamp | Date; // Firestore Timestamp or JS Date
 }
 
 
 export interface Order {
-  id: string; // Permanent ID once saved
+  id: string; // Firestore document ID
   customerName: string;
   items: OrderItem[];
   totalAmount: number;
-  orderDate: string; // ISO string format
+  orderDate: Timestamp | Date; // Firestore Timestamp or JS Date
+  category?: string; // Optional category for the order
 }

@@ -2,21 +2,21 @@
 "use client";
 
 import type { OrderItem, PendingOrder } from '@/lib/types';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
+// Removed Label as it's not used directly here, only Dialog specific labels
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { CheckCircle, Edit, AlertCircle, MinusCircle, PlusCircle } from 'lucide-react';
+import { CheckCircle, Edit, AlertCircle, MinusCircle, PlusCircle, Loader2 } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 
 interface DeliveryConfirmationDialogProps {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
   order: PendingOrder | null;
-  onConfirmFullDelivery: (orderId: string) => void;
-  onUpdatePendingQuantities: (orderId: string, updatedItems: OrderItem[]) => void;
+  onConfirmFullDelivery: (orderId: string) => Promise<void>;
+  onUpdatePendingQuantities: (orderId: string, updatedItems: OrderItem[]) => Promise<void>;
 }
 
 export default function DeliveryConfirmationDialog({
@@ -28,14 +28,15 @@ export default function DeliveryConfirmationDialog({
 }: DeliveryConfirmationDialogProps) {
   const { toast } = useToast();
   const [editedItems, setEditedItems] = useState<OrderItem[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
     if (order) {
-      setEditedItems(JSON.parse(JSON.stringify(order.items))); // Deep copy
+      setEditedItems(JSON.parse(JSON.stringify(order.items))); 
     } else {
       setEditedItems([]);
     }
-  }, [order, isOpen]); // Re-initialize when dialog opens or order changes
+  }, [order, isOpen]);
 
   const handleQuantityChange = (productId: string, newQuantity: number) => {
     setEditedItems(prevItems =>
@@ -45,17 +46,26 @@ export default function DeliveryConfirmationDialog({
     );
   };
 
-  const handleConfirmDelivery = () => {
+  const handleConfirmDelivery = async () => {
     if (!order) return;
-    onConfirmFullDelivery(order.id);
+    setIsProcessing(true);
+    await onConfirmFullDelivery(order.id);
+    setIsProcessing(false);
     onOpenChange(false);
+    // Toast handled by parent after successful Firestore operations
   };
 
-  const handleUpdatePending = () => {
+  const handleUpdatePending = async () => {
     if (!order) return;
+    setIsProcessing(true);
     const validUpdatedItems = editedItems.filter(item => item.quantity > 0);
     const itemsWithZeroQuantity = editedItems.filter(item => item.quantity === 0);
 
+    await onUpdatePendingQuantities(order.id, validUpdatedItems);
+    setIsProcessing(false);
+    onOpenChange(false);
+
+    // Toast logic remains client-side as it's about the immediate UI feedback of this dialog
     if (itemsWithZeroQuantity.length > 0 && validUpdatedItems.length === 0 && editedItems.length > 0) {
          toast({
             title: "Order Cleared",
@@ -75,10 +85,6 @@ export default function DeliveryConfirmationDialog({
             variant: "default"
         });
     }
-
-
-    onUpdatePendingQuantities(order.id, validUpdatedItems);
-    onOpenChange(false);
   };
   
   const allItemsPendingZero = editedItems.every(item => item.quantity === 0);
@@ -86,7 +92,7 @@ export default function DeliveryConfirmationDialog({
   if (!order) return null;
 
   return (
-    <Dialog open={isOpen} onOpenChange={onOpenChange}>
+    <Dialog open={isOpen} onOpenChange={(open) => { if(!isProcessing) onOpenChange(open)}}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center"><Edit className="mr-2 h-5 w-5 text-primary" />Manage Delivery for: {order.customerName}</DialogTitle>
@@ -113,7 +119,7 @@ export default function DeliveryConfirmationDialog({
                       <TableCell className="font-medium">{item.productName}</TableCell>
                       <TableCell className="text-center">
                         <div className="flex items-center justify-center gap-1">
-                            <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-destructive/20" onClick={() => handleQuantityChange(item.productId, item.quantity - 1)} disabled={item.quantity === 0}>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-destructive/20" onClick={() => handleQuantityChange(item.productId, item.quantity - 1)} disabled={item.quantity === 0 || isProcessing}>
                                 <MinusCircle className="h-4 w-4" />
                             </Button>
                             <Input
@@ -122,8 +128,9 @@ export default function DeliveryConfirmationDialog({
                                 onChange={(e) => handleQuantityChange(item.productId, parseInt(e.target.value, 10) || 0)}
                                 className="h-8 w-16 text-center px-1"
                                 min="0"
+                                disabled={isProcessing}
                             />
-                            <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-primary/20" onClick={() => handleQuantityChange(item.productId, item.quantity + 1)}>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-primary/20" onClick={() => handleQuantityChange(item.productId, item.quantity + 1)} disabled={isProcessing}>
                                 <PlusCircle className="h-4 w-4" />
                             </Button>
                         </div>
@@ -146,13 +153,14 @@ export default function DeliveryConfirmationDialog({
             </div>
         )}
 
-
         <DialogFooter className="gap-2 sm:gap-0">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={handleUpdatePending} variant="secondary" disabled={!editedItems.length && !order.items.length}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isProcessing}>Cancel</Button>
+          <Button onClick={handleUpdatePending} variant="secondary" disabled={(!editedItems.length && !order.items.length) || isProcessing}>
+             {isProcessing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
              <Edit className="mr-2 h-4 w-4" /> Update Pending Order
           </Button>
-          <Button onClick={handleConfirmDelivery} className="bg-green-600 hover:bg-green-700 text-white" disabled={!order.items.length}>
+          <Button onClick={handleConfirmDelivery} className="bg-green-600 hover:bg-green-700 text-white" disabled={!order.items.length || isProcessing}>
+            {isProcessing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             <CheckCircle className="mr-2 h-4 w-4" /> Mark Fully Delivered & Save
           </Button>
         </DialogFooter>

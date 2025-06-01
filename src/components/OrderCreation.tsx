@@ -9,12 +9,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { PlusCircle, Trash2, MinusCircle, PackagePlus, ListChecks } from 'lucide-react';
+import { PlusCircle, Trash2, MinusCircle, PackagePlus, ListChecks, Loader2 } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 
 interface OrderCreationProps {
   products: Product[];
-  onAddItemsToPendingList: (customerName: string, items: OrderItem[]) => void;
+  onAddItemsToPendingList: (customerName: string, items: OrderItem[]) => Promise<void>;
 }
 
 export default function OrderCreation({
@@ -26,6 +26,7 @@ export default function OrderCreation({
   const [stagedItems, setStagedItems] = useState<OrderItem[]>([]);
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [quantity, setQuantity] = useState<number>(1);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleStageItem = () => {
     if (!currentCustomerName.trim()) {
@@ -74,20 +75,21 @@ export default function OrderCreation({
     }
   };
 
-  const handleAddBatchToPendingList = () => {
+  const handleAddBatchToPendingList = async () => {
     if (!currentCustomerName.trim()) {
-      toast({ title: "Customer Name Missing", description: "Please enter a customer name before adding the batch to the pending list.", variant: "destructive" });
+      toast({ title: "Customer Name Missing", description: "Please enter a customer name before adding.", variant: "destructive" });
       return;
     }
     if (stagedItems.length === 0) {
-      toast({ title: "No Items in Batch", description: "Please add items to the current batch before adding to the pending list.", variant: "destructive" });
+      toast({ title: "No Items in Batch", description: "Please add items to the current batch.", variant: "destructive" });
       return;
     }
-    onAddItemsToPendingList(currentCustomerName, stagedItems);
-    const customerForToast = currentCustomerName; // Capture before reset
+    setIsSubmitting(true);
+    await onAddItemsToPendingList(currentCustomerName, stagedItems);
     setCurrentCustomerName('');
     setStagedItems([]);
-    toast({ title: "Batch Added to Queue", description: `Batch for ${customerForToast} sent to pending orders queue. Ready for next customer.` });
+    setIsSubmitting(false);
+    // Toast handled by hook
   };
 
   const canDecreaseStagedQuantity = (productId: string) => {
@@ -142,7 +144,7 @@ export default function OrderCreation({
               />
             </div>
           </div>
-          <Button onClick={handleStageItem} className="mt-3 w-full md:w-auto" disabled={products.length === 0 || !selectedProductId || !currentCustomerName.trim()}>
+          <Button onClick={handleStageItem} className="mt-3 w-full md:w-auto" disabled={isSubmitting || products.length === 0 || !selectedProductId || !currentCustomerName.trim()}>
             <PlusCircle className="mr-2 h-4 w-4" /> Add Product to {currentCustomerName || "Customer"}'s Batch
           </Button>
         </div>
@@ -184,7 +186,8 @@ export default function OrderCreation({
             </div>
             <div className="flex flex-col sm:flex-row items-center justify-between mt-4 space-y-2 sm:space-y-0">
                 <p className="text-xl font-semibold">Batch Total for {currentCustomerName || "..."}: <span className="text-accent">${stagedItemsTotal.toFixed(2)}</span></p>
-                <Button onClick={handleAddBatchToPendingList} size="lg" disabled={stagedItems.length === 0 || !currentCustomerName.trim()}>
+                <Button onClick={handleAddBatchToPendingList} size="lg" disabled={isSubmitting || stagedItems.length === 0 || !currentCustomerName.trim()}>
+                    {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     <ListChecks className="mr-2 h-5 w-5" /> Add This Batch to Pending Orders Queue
                 </Button>
             </div>
@@ -200,4 +203,3 @@ export default function OrderCreation({
     </Card>
   );
 }
-

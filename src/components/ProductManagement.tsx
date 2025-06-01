@@ -13,14 +13,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { PlusCircle, Edit3, Trash2, PackageSearch } from 'lucide-react';
-import { useToast } from "@/hooks/use-toast";
+import { PlusCircle, Edit3, Trash2, PackageSearch, Loader2 } from 'lucide-react';
+// Removed useToast as it's handled by hooks
 
 interface ProductManagementProps {
   products: Product[];
-  onAddProduct: (productData: Omit<Product, 'id'>) => void;
-  onUpdateProduct: (product: Product) => void;
-  onDeleteProduct: (productId: string) => void;
+  onAddProduct: (productData: Omit<Product, 'id'>) => Promise<void>;
+  onUpdateProduct: (product: Product) => Promise<void>;
+  onDeleteProduct: (productId: string) => Promise<void>;
 }
 
 const productSchema = z.object({
@@ -33,10 +33,11 @@ const productSchema = z.object({
 type ProductFormData = z.infer<typeof productSchema>;
 
 export default function ProductManagement({ products, onAddProduct, onUpdateProduct, onDeleteProduct }: ProductManagementProps) {
-  const { toast } = useToast();
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
 
   const addForm = useForm<ProductFormData>({
     resolver: zodResolver(productSchema),
@@ -47,19 +48,23 @@ export default function ProductManagement({ products, onAddProduct, onUpdateProd
     resolver: zodResolver(productSchema),
   });
 
-  const handleAddSubmit: SubmitHandler<ProductFormData> = (data) => {
-    onAddProduct(data);
+  const handleAddSubmit: SubmitHandler<ProductFormData> = async (data) => {
+    setIsSubmitting(true);
+    await onAddProduct(data);
     addForm.reset({ name: "", price: 0, description: "", category: "" });
     setIsAddDialogOpen(false);
-    toast({ title: "Product Added", description: `${data.name} has been added to the catalog.` });
+    setIsSubmitting(false);
+    // Toast handled by hook
   };
 
-  const handleEditSubmit: SubmitHandler<ProductFormData> = (data) => {
+  const handleEditSubmit: SubmitHandler<ProductFormData> = async (data) => {
     if (editingProduct) {
-      onUpdateProduct({ ...editingProduct, ...data });
+      setIsSubmitting(true);
+      await onUpdateProduct({ ...editingProduct, ...data });
       setEditingProduct(null);
       setIsEditDialogOpen(false);
-      toast({ title: "Product Updated", description: `${data.name} has been updated.` });
+      setIsSubmitting(false);
+      // Toast handled by hook
     }
   };
 
@@ -69,10 +74,11 @@ export default function ProductManagement({ products, onAddProduct, onUpdateProd
     setIsEditDialogOpen(true);
   };
 
-  const handleDelete = (productId: string) => {
-    const product = products.find(p => p.id === productId);
-    onDeleteProduct(productId);
-    toast({ title: "Product Deleted", description: `${product?.name || 'Product'} has been deleted.`, variant: "destructive" });
+  const handleDelete = async (productId: string) => {
+    // Confirmation dialog handles actual deletion, this is just a pre-step if needed
+    // For now, direct call
+    await onDeleteProduct(productId);
+    // Toast handled by hook
   };
 
   return (
@@ -118,8 +124,11 @@ export default function ProductManagement({ products, onAddProduct, onUpdateProd
                   </FormItem>
                 )} />
                 <DialogFooter>
-                  <DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose>
-                  <Button type="submit">Add Product</Button>
+                  <DialogClose asChild><Button type="button" variant="outline" disabled={isSubmitting}>Cancel</Button></DialogClose>
+                  <Button type="submit" disabled={isSubmitting}>
+                    {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Add Product
+                  </Button>
                 </DialogFooter>
               </form>
             </Form>
@@ -210,8 +219,11 @@ export default function ProductManagement({ products, onAddProduct, onUpdateProd
                   </FormItem>
                 )} />
                 <DialogFooter>
-                   <DialogClose asChild><Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)}>Cancel</Button></DialogClose>
-                  <Button type="submit">Save Changes</Button>
+                   <DialogClose asChild><Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)} disabled={isSubmitting}>Cancel</Button></DialogClose>
+                  <Button type="submit" disabled={isSubmitting}>
+                    {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Save Changes
+                  </Button>
                 </DialogFooter>
               </form>
             </Form>
