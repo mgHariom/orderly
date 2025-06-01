@@ -1,15 +1,18 @@
 
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
 import type { Product, OrderItem, Order } from '@/lib/types';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { getLocalStorageItem, setLocalStorageItem } from '@/lib/localStorage';
 import Header from '@/components/Header';
 import ProductManagement from '@/components/ProductManagement';
 import OrderCreation from '@/components/OrderCreation';
 import PastOrders from '@/components/PastOrders';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ShoppingCart, PackageSearch, HistoryIcon, WorkflowIcon } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ShoppingCart, PackageSearch, HistoryIcon, UserCircle, WorkflowIcon, CheckCircle2, ListPlus } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import { format } from 'date-fns';
 
@@ -22,13 +25,14 @@ export default function OrderFlowApp() {
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   
+  // State for the order currently being built
+  const [currentCustomerName, setCurrentCustomerName] = useState<string>('');
+  const [currentItems, setCurrentItems] = useState<OrderItem[]>([]); // Items added to the actual order
+  const [stagedItems, setStagedItems] = useState<OrderItem[]>([]); // Items staged in OrderCreation
+
   const [isSavingOrder, setIsSavingOrder] = useState(false);
   const [isClient, setIsClient] = useState(false);
   const [initialAgedOrderCheckDone, setInitialAgedOrderCheckDone] = useState(false);
-
-  // State for OrderCreation to reset itself
-  const [orderCreationKey, setOrderCreationKey] = useState(Date.now());
-
 
   useEffect(() => {
     setIsClient(true);
@@ -64,7 +68,6 @@ export default function OrderFlowApp() {
     }
   }, [orders, isClient, initialAgedOrderCheckDone, toast]);
 
-
   useEffect(() => {
     if(isClient) setLocalStorageItem(PRODUCTS_STORAGE_KEY, products);
   }, [products, isClient]);
@@ -89,54 +92,62 @@ export default function OrderFlowApp() {
     toast({ title: "Product Deleted", description: `${product?.name || 'Product'} has been deleted.`, variant: "destructive" });
   }, [products, toast]);
 
+  const handleAddStagedItemsToCurrentOrder = useCallback((itemsToAdd: OrderItem[]) => {
+    if (itemsToAdd.length === 0) {
+      toast({ title: "No Items Staged", description: "Please stage some items first.", variant: "destructive" });
+      return;
+    }
+    setCurrentItems(prevCurrentItems => {
+      const updatedItems = [...prevCurrentItems];
+      itemsToAdd.forEach(stagedItem => {
+        const existingItemIndex = updatedItems.findIndex(item => item.productId === stagedItem.productId);
+        if (existingItemIndex > -1) {
+          updatedItems[existingItemIndex].quantity += stagedItem.quantity;
+        } else {
+          updatedItems.push({...stagedItem});
+        }
+      });
+      return updatedItems;
+    });
+    setStagedItems([]); // Clear staged items after adding them
+    toast({ title: "Items Added to Order", description: `${itemsToAdd.length} item(s)/type(s) added to the current order.` });
+  }, [toast]);
 
-  const handleSaveOrder = useCallback(async (orderData: { customerName: string; items: OrderItem[] }) => {
-    if (!orderData.customerName.trim()) {
+  const handleSaveCurrentOrder = useCallback(async () => {
+    if (!currentCustomerName.trim()) {
        toast({ title: "Customer Name Required", description: "Please enter a customer name.", variant: "destructive" });
        return;
     }
-    if (orderData.items.length === 0) {
-       toast({ title: "Empty Order", description: "Cannot save an empty order.", variant: "destructive" });
+    if (currentItems.length === 0) {
+       toast({ title: "Empty Order", description: "Cannot save an empty order. Add items first.", variant: "destructive" });
        return;
     }
     setIsSavingOrder(true);
-    await new Promise(resolve => setTimeout(resolve, 300)); 
+    await new Promise(resolve => setTimeout(resolve, 300)); // Simulate async save
 
-    const totalAmount = orderData.items.reduce((total, item) => total + (item.price * item.quantity), 0);
+    const totalAmount = currentItems.reduce((total, item) => total + (item.price * item.quantity), 0);
     
-    let orderCategory: string | undefined = undefined;
-    for (const item of orderData.items) {
-      const productDetails = products.find(p => p.id === item.productId);
-      if (productDetails && productDetails.category) {
-        orderCategory = productDetails.category;
-        break; 
-      }
-    }
-
     const newOrder: Order = {
       id: crypto.randomUUID(),
-      customerName: orderData.customerName,
-      items: orderData.items,
+      customerName: currentCustomerName,
+      items: currentItems,
       totalAmount: totalAmount,
       orderDate: new Date().toISOString(),
-      category: orderCategory,
     };
     setOrders(prevOrders => [newOrder, ...prevOrders].sort((a,b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime()));
     
     setIsSavingOrder(false);
     toast({ title: "Order Saved!", description: `Order for ${newOrder.customerName} has been successfully saved.` });
     
-    // Trigger re-render of OrderCreation to reset its internal state
-    setOrderCreationKey(Date.now());
+    // Reset for next order
+    setCurrentCustomerName('');
+    setCurrentItems([]);
+    setStagedItems([]); // Also clear any remaining staged items, though should be clear
+  }, [currentCustomerName, currentItems, toast]);
 
-  }, [products, toast]);
-
-  const handleOrderCreationReset = useCallback(() => {
-    // This function is passed to OrderCreation and called internally by it after a successful save
-    // to signal OrderFlowApp that it can clear relevant states or trigger resets.
-    // In this new setup, we re-key OrderCreation to force a reset.
-    setOrderCreationKey(Date.now());
-  }, []);
+  const currentOrderTotal = useMemo(() => {
+    return currentItems.reduce((total, item) => total + (item.price * item.quantity), 0);
+  }, [currentItems]);
 
 
   if (!isClient) {
@@ -169,13 +180,48 @@ export default function OrderFlowApp() {
             </TabsTrigger>
           </TabsList>
           
-          <TabsContent value="create-order" className="mt-0">
+          <TabsContent value="create-order" className="mt-0 space-y-6">
+            <Card className="shadow-lg">
+              <CardHeader>
+                <CardTitle className="font-headline flex items-center"><UserCircle className="mr-2 h-5 w-5" />Customer & Order Details</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <Input
+                  placeholder="Enter customer name for this order"
+                  value={currentCustomerName}
+                  onChange={(e) => setCurrentCustomerName(e.target.value)}
+                />
+                 {currentItems.length > 0 && (
+                  <div>
+                    <h3 className="text-lg font-medium mb-2">Current Order Items for: <span className="text-primary">{currentCustomerName || "..."}</span></h3>
+                    <ul className="space-y-1 text-sm border p-3 rounded-md bg-muted/20">
+                      {currentItems.map(item => (
+                        <li key={item.productId} className="flex justify-between">
+                          <span>{item.productName} (x{item.quantity})</span>
+                          <span>${(item.price * item.quantity).toFixed(2)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="text-right font-semibold mt-2">Subtotal: ${currentOrderTotal.toFixed(2)}</p>
+                  </div>
+                )}
+                {currentItems.length === 0 && (
+                    <p className="text-muted-foreground text-sm text-center py-2">No items added to the current order yet. Use "Stage & Add Items" below.</p>
+                )}
+              </CardContent>
+              <CardFooter className="flex flex-col sm:flex-row items-center justify-between space-y-2 sm:space-y-0 pt-4 border-t bg-muted/20">
+                 <p className="text-2xl font-bold">Order Total: <span className="text-primary">${currentOrderTotal.toFixed(2)}</span></p>
+                 <Button onClick={handleSaveCurrentOrder} size="lg" disabled={isSavingOrder || currentItems.length === 0 || !currentCustomerName.trim()}>
+                    <CheckCircle2 className="mr-2 h-5 w-5" /> {isSavingOrder ? 'Saving...' : 'Save This Order'}
+                </Button>
+              </CardFooter>
+            </Card>
+
             <OrderCreation
-              key={orderCreationKey} // Re-key to reset state after save
               products={products}
-              onSaveOrder={handleSaveOrder}
-              isSaving={isSavingOrder}
-              onOrderSaved={handleOrderCreationReset} // Pass reset callback
+              onAddStagedItemsToCurrentOrder={handleAddStagedItemsToCurrentOrder}
+              stagedItems={stagedItems} // Pass stagedItems state
+              setStagedItems={setStagedItems} // Pass setter for stagedItems
             />
           </TabsContent>
           <TabsContent value="manage-products" className="mt-0">
@@ -187,7 +233,7 @@ export default function OrderFlowApp() {
             />
           </TabsContent>
           <TabsContent value="past-orders" className="mt-0">
-            <PastOrders orders={orders} products={products} />
+            <PastOrders orders={orders} />
           </TabsContent>
         </Tabs>
       </main>
