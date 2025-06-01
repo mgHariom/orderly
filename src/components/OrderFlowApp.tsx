@@ -9,10 +9,9 @@ import ProductManagement from '@/components/ProductManagement';
 import OrderCreation from '@/components/OrderCreation';
 import PastOrders from '@/components/PastOrders';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
-import { ShoppingCart, PackageSearch, HistoryIcon, UserCircle, WorkflowIcon, CheckCircle2 } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'; // Removed CardFooter
+import { ShoppingCart, PackageSearch, HistoryIcon, UserCircle, WorkflowIcon, CheckCircle2, Trash2 } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import { format } from 'date-fns';
 
@@ -20,17 +19,22 @@ const PRODUCTS_STORAGE_KEY = 'orderflow-products';
 const ORDERS_STORAGE_KEY = 'orderflow-orders';
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 
+interface PendingOrder {
+  id: string; // Temporary client-side ID
+  customerName: string;
+  items: OrderItem[];
+  totalAmount: number;
+}
+
 export default function OrderFlowApp() {
   const { toast } = useToast();
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   
-  // State for the order currently being built
-  const [currentCustomerName, setCurrentCustomerName] = useState<string>('');
-  const [currentItems, setCurrentItems] = useState<OrderItem[]>([]); // Items added to the actual order
-  const [stagedItems, setStagedItems] = useState<OrderItem[]>([]); // Items staged in OrderCreation
+  const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
+  const [stagedItems, setStagedItems] = useState<OrderItem[]>([]); // Staged items in OrderCreation, passed down
 
-  const [isSavingOrder, setIsSavingOrder] = useState(false);
+  const [isSavingOrder, setIsSavingOrder] = useState<string | null>(null); // Store ID of order being saved
   const [isClient, setIsClient] = useState(false);
   const [initialAgedOrderCheckDone, setInitialAgedOrderCheckDone] = useState(false);
 
@@ -92,69 +96,61 @@ export default function OrderFlowApp() {
     toast({ title: "Product Deleted", description: `${product?.name || 'Product'} has been deleted.`, variant: "destructive" });
   }, [products, toast]);
 
-  const handleAddStagedItemsToCurrentOrder = useCallback((itemsToAdd: OrderItem[]) => {
+  const handleAddItemsToPendingList = useCallback((customerName: string, itemsToAdd: OrderItem[]) => {
+    if (!customerName.trim()) {
+      toast({ title: "Customer Name Required", description: "Please ensure a customer name is set in the staging area.", variant: "destructive" });
+      return;
+    }
     if (itemsToAdd.length === 0) {
       toast({ title: "No Items Staged", description: "Please stage some items first.", variant: "destructive" });
       return;
     }
-    setCurrentItems(prevCurrentItems => {
-      const updatedItems = [...prevCurrentItems];
-      itemsToAdd.forEach(stagedItem => {
-        const existingItemIndex = updatedItems.findIndex(item => item.productId === stagedItem.productId);
-        if (existingItemIndex > -1) {
-          updatedItems[existingItemIndex].quantity += stagedItem.quantity;
-        } else {
-          updatedItems.push({...stagedItem});
-        }
-      });
-      return updatedItems;
-    });
-    setStagedItems([]); // Clear staged items after adding them
-    toast({ title: "Items Added to Order", description: `${itemsToAdd.length} item(s)/type(s) added to the current order.` });
-  }, [toast]);
 
-  const handleSaveCurrentOrder = useCallback(async () => {
-    if (!currentCustomerName.trim()) {
-       toast({ title: "Customer Name Required", description: "Please enter a customer name.", variant: "destructive" });
-       return;
+    const totalAmount = itemsToAdd.reduce((total, item) => total + (item.price * item.quantity), 0);
+    const newPendingOrder: PendingOrder = {
+      id: crypto.randomUUID(), // Temporary ID for client-side management
+      customerName,
+      items: itemsToAdd,
+      totalAmount,
+    };
+
+    setPendingOrders(prev => [...prev, newPendingOrder]);
+    setStagedItems([]); // Clear staged items in OrderCreation by re-passing empty array (or allow OrderCreation to clear itself)
+    toast({ title: "Order Staged", description: `Order for ${customerName} with ${itemsToAdd.length} item type(s) added to pending list.` });
+  }, [toast]);
+  
+  const handleSavePendingOrder = useCallback(async (pendingOrderId: string) => {
+    const orderToSave = pendingOrders.find(po => po.id === pendingOrderId);
+    if (!orderToSave) {
+      toast({ title: "Error", description: "Could not find the order to save.", variant: "destructive" });
+      return;
     }
-    if (currentItems.length === 0) {
-       toast({ title: "Empty Order", description: "Cannot save an empty order. Add items first.", variant: "destructive" });
-       return;
-    }
-    setIsSavingOrder(true);
+
+    setIsSavingOrder(pendingOrderId);
     await new Promise(resolve => setTimeout(resolve, 300)); // Simulate async save
 
-    const totalAmount = currentItems.reduce((total, item) => total + (item.price * item.quantity), 0);
-    
     const newOrder: Order = {
-      id: crypto.randomUUID(),
-      customerName: currentCustomerName,
-      items: currentItems,
-      totalAmount: totalAmount,
+      id: crypto.randomUUID(), // Generate new permanent ID
+      customerName: orderToSave.customerName,
+      items: orderToSave.items,
+      totalAmount: orderToSave.totalAmount,
       orderDate: new Date().toISOString(),
-      // category: currentItems.length > 0 ? (currentItems.find(item => {
-      //   const product = products.find(p => p.id === item.productId);
-      //   return product && product.category;
-      // }) ? products.find(p => p.id === (currentItems.find(item => {
-      //   const product = products.find(p => p.id === item.productId);
-      //   return product && product.category;
-      // }) as OrderItem).productId)?.category : undefined) : undefined,
     };
     setOrders(prevOrders => [newOrder, ...prevOrders].sort((a,b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime()));
+    setPendingOrders(prev => prev.filter(po => po.id !== pendingOrderId));
     
-    setIsSavingOrder(false);
+    setIsSavingOrder(null);
     toast({ title: "Order Saved!", description: `Order for ${newOrder.customerName} has been successfully saved.` });
     
-    // Reset for next order
-    setCurrentCustomerName('');
-    setCurrentItems([]);
-    setStagedItems([]); // Also clear any remaining staged items, though should be clear
-  }, [currentCustomerName, currentItems, toast, products]);
+  }, [pendingOrders, toast]);
 
-  const currentOrderTotal = useMemo(() => {
-    return currentItems.reduce((total, item) => total + (item.price * item.quantity), 0);
-  }, [currentItems]);
+  const handleRemovePendingOrder = useCallback((pendingOrderId: string) => {
+    const orderToRemove = pendingOrders.find(po => po.id === pendingOrderId);
+    setPendingOrders(prev => prev.filter(po => po.id !== pendingOrderId));
+    if (orderToRemove) {
+        toast({ title: "Pending Order Removed", description: `Pending order for ${orderToRemove.customerName} has been removed.`, variant: "destructive" });
+    }
+  }, [pendingOrders, toast]);
 
 
   if (!isClient) {
@@ -190,45 +186,64 @@ export default function OrderFlowApp() {
           <TabsContent value="create-order" className="mt-0 space-y-6">
             <Card className="shadow-lg">
               <CardHeader>
-                <CardTitle className="font-headline flex items-center"><UserCircle className="mr-2 h-5 w-5" />Customer & Order Details</CardTitle>
+                <CardTitle className="font-headline flex items-center"><UserCircle className="mr-2 h-5 w-5" />Pending Orders Queue</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <Input
-                  placeholder="Enter customer name for this order"
-                  value={currentCustomerName}
-                  onChange={(e) => setCurrentCustomerName(e.target.value)}
-                />
-                 {currentItems.length > 0 && (
-                  <div>
-                    <h3 className="text-lg font-medium mb-2">Current Order Items for: <span className="text-primary">{currentCustomerName || "..."}</span></h3>
-                    <ul className="space-y-1 text-sm border p-3 rounded-md bg-muted/20">
-                      {currentItems.map(item => (
-                        <li key={item.productId} className="flex justify-between">
-                          <span>{item.productName} (x{item.quantity})</span>
-                          <span>${(item.price * item.quantity).toFixed(2)}</span>
-                        </li>
-                      ))}
-                    </ul>
-                    <p className="text-right font-semibold mt-2">Subtotal: ${currentOrderTotal.toFixed(2)}</p>
+                 {pendingOrders.length > 0 ? (
+                  <div className="space-y-6">
+                    {pendingOrders.map((pendingOrder) => (
+                      <Card key={pendingOrder.id} className="bg-muted/20 shadow-md">
+                        <CardHeader>
+                          <div className="flex justify-between items-center">
+                            <CardTitle className="text-lg text-primary">{pendingOrder.customerName}</CardTitle>
+                            <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                onClick={() => handleRemovePendingOrder(pendingOrder.id)}
+                                className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 w-8"
+                                disabled={isSavingOrder === pendingOrder.id}
+                            >
+                                <Trash2 className="h-4 w-4" />
+                                <span className="sr-only">Remove Pending Order</span>
+                            </Button>
+                          </div>
+                        </CardHeader>
+                        <CardContent>
+                          <ul className="space-y-1 text-sm border p-3 rounded-md bg-background">
+                            {pendingOrder.items.map(item => (
+                              <li key={item.productId} className="flex justify-between">
+                                <span>{item.productName} (x{item.quantity})</span>
+                                <span>${(item.price * item.quantity).toFixed(2)}</span>
+                              </li>
+                            ))}
+                          </ul>
+                          <div className="flex justify-between items-center mt-3 pt-3 border-t">
+                            <p className="font-semibold text-lg">Subtotal: <span className="text-primary">${pendingOrder.totalAmount.toFixed(2)}</span></p>
+                            <Button 
+                              onClick={() => handleSavePendingOrder(pendingOrder.id)} 
+                              size="default" 
+                              disabled={isSavingOrder === pendingOrder.id || (isSavingOrder !== null && isSavingOrder !== pendingOrder.id)}
+                            >
+                              <CheckCircle2 className="mr-2 h-5 w-5" /> 
+                              {isSavingOrder === pendingOrder.id ? 'Saving...' : 'Save This Order'}
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
                   </div>
-                )}
-                {currentItems.length === 0 && (
-                    <p className="text-muted-foreground text-sm text-center py-2">No items added to the current order yet. Use "Stage & Add Items" below.</p>
+                ) : (
+                    <p className="text-muted-foreground text-sm text-center py-4 bg-muted/30 rounded-md">No orders currently pending. Use "Stage & Add Items" below to create new pending orders.</p>
                 )}
               </CardContent>
-              <CardFooter className="flex flex-col sm:flex-row items-center justify-between space-y-2 sm:space-y-0 pt-4 border-t bg-muted/20">
-                 <p className="text-2xl font-bold">Order Total: <span className="text-primary">${currentOrderTotal.toFixed(2)}</span></p>
-                 <Button onClick={handleSaveCurrentOrder} size="lg" disabled={isSavingOrder || currentItems.length === 0 || !currentCustomerName.trim()}>
-                    <CheckCircle2 className="mr-2 h-5 w-5" /> {isSavingOrder ? 'Saving...' : 'Save This Order'}
-                </Button>
-              </CardFooter>
+              {/* CardFooter removed as save actions are now per pending order */}
             </Card>
 
             <OrderCreation
               products={products}
-              onAddStagedItemsToCurrentOrder={handleAddStagedItemsToCurrentOrder}
-              stagedItems={stagedItems} // Pass stagedItems state
-              setStagedItems={setStagedItems} // Pass setter for stagedItems
+              onAddItemsToPendingList={handleAddItemsToPendingList} // Renamed prop
+              // stagedItems is managed internally by OrderCreation now, or passed for its initial state
+              // setStagedItems is managed internally by OrderCreation now
             />
           </TabsContent>
           <TabsContent value="manage-products" className="mt-0">
@@ -250,5 +265,3 @@ export default function OrderFlowApp() {
     </div>
   );
 }
-
-    
