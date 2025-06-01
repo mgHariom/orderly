@@ -1,8 +1,6 @@
 
-import type { Timestamp } from 'firebase/firestore';
-
 export interface Product {
-  id: string; // Firestore document ID
+  id: string;
   name: string;
   price: number;
   description?: string;
@@ -17,19 +15,19 @@ export interface OrderItem {
 }
 
 export interface PendingOrder {
-  id: string; // Firestore document ID
+  id: string; 
   customerName: string;
   items: OrderItem[];
   totalAmount: number;
-  createdAt: Timestamp | Date; // Firestore Timestamp or JS Date
+  createdAt: string; // ISO Date String
 }
 
 
 export interface Order {
-  id: string; // Firestore document ID
+  id: string; 
   customerName: string;
   items: OrderItem[];
   totalAmount: number;
-  orderDate: Timestamp | Date; // Firestore Timestamp or JS Date
-  category?: string; // Optional category for the order
+  orderDate: string; // ISO Date String
+  category?: string; 
 }

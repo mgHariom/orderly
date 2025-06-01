@@ -14,7 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 
 interface OrderCreationProps {
   products: Product[];
-  onAddItemsToPendingList: (customerName: string, items: OrderItem[]) => Promise<void>;
+  onAddItemsToPendingList: (customerName: string, items: OrderItem[]) => void;
 }
 
 export default function OrderCreation({
@@ -26,7 +26,7 @@ export default function OrderCreation({
   const [stagedItems, setStagedItems] = useState<OrderItem[]>([]);
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [quantity, setQuantity] = useState<number>(1);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false); // Used for the "Add to Pending Queue" button
 
   const handleStageItem = () => {
     if (!currentCustomerName.trim()) {
@@ -59,8 +59,8 @@ export default function OrderCreation({
         return [...prevItems, { productId: product.id, productName: product.name, quantity, price: product.price }];
       }
     });
-    setSelectedProductId('');
-    setQuantity(1);
+    setSelectedProductId(''); // Reset product selection
+    setQuantity(1); // Reset quantity
   };
 
   const handleUpdateStagedItemQuantity = (productId: string, newQuantity: number) => {
@@ -75,21 +75,24 @@ export default function OrderCreation({
     }
   };
 
-  const handleAddBatchToPendingList = async () => {
+  const handleAddBatchToPendingList = () => {
     if (!currentCustomerName.trim()) {
-      toast({ title: "Customer Name Missing", description: "Please enter a customer name before adding.", variant: "destructive" });
+      toast({ title: "Customer Name Missing", description: "Please enter a customer name before adding the batch.", variant: "destructive" });
       return;
     }
     if (stagedItems.length === 0) {
-      toast({ title: "No Items in Batch", description: "Please add items to the current batch.", variant: "destructive" });
+      toast({ title: "No Items in Batch", description: "Please add items to the current batch for this customer.", variant: "destructive" });
       return;
     }
     setIsSubmitting(true);
-    await onAddItemsToPendingList(currentCustomerName, stagedItems);
+    onAddItemsToPendingList(currentCustomerName, stagedItems);
+    // Clear staging area for the next customer/batch
     setCurrentCustomerName('');
     setStagedItems([]);
+    setSelectedProductId('');
+    setQuantity(1);
     setIsSubmitting(false);
-    // Toast handled by hook
+    // Toast for success is handled in OrderFlowApp after state update
   };
 
   const canDecreaseStagedQuantity = (productId: string) => {
@@ -116,11 +119,12 @@ export default function OrderCreation({
                   placeholder="Enter customer name for this batch"
                   value={currentCustomerName}
                   onChange={(e) => setCurrentCustomerName(e.target.value)}
+                  disabled={isSubmitting}
               />
             </div>
             <div className="md:col-span-2 space-y-1">
               <Label htmlFor="productSelectStaging">Product</Label>
-              <Select value={selectedProductId} onValueChange={setSelectedProductId}>
+              <Select value={selectedProductId} onValueChange={setSelectedProductId} disabled={isSubmitting}>
                 <SelectTrigger id="productSelectStaging">
                   <SelectValue placeholder="Select a product" />
                 </SelectTrigger>
@@ -141,6 +145,7 @@ export default function OrderCreation({
                 min="1"
                 value={quantity}
                 onChange={(e) => setQuantity(parseInt(e.target.value, 10) || 1)}
+                disabled={isSubmitting}
               />
             </div>
           </div>
@@ -169,15 +174,15 @@ export default function OrderCreation({
                       <TableCell className="font-medium">{item.productName}</TableCell>
                       <TableCell className="text-center">
                         <div className="flex items-center justify-center gap-1">
-                          <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-accent/50" onClick={() => handleUpdateStagedItemQuantity(item.productId, item.quantity - 1)} disabled={!canDecreaseStagedQuantity(item.productId)}><MinusCircle className="h-4 w-4" /></Button>
+                          <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-accent/50" onClick={() => handleUpdateStagedItemQuantity(item.productId, item.quantity - 1)} disabled={!canDecreaseStagedQuantity(item.productId) || isSubmitting}><MinusCircle className="h-4 w-4" /></Button>
                           <span className="w-6 text-center">{item.quantity}</span>
-                          <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-accent/50" onClick={() => handleUpdateStagedItemQuantity(item.productId, item.quantity + 1)}><PlusCircle className="h-4 w-4" /></Button>
+                          <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-accent/50" onClick={() => handleUpdateStagedItemQuantity(item.productId, item.quantity + 1)} disabled={isSubmitting}><PlusCircle className="h-4 w-4" /></Button>
                         </div>
                       </TableCell>
                       <TableCell className="text-right hidden sm:table-cell">${item.price.toFixed(2)}</TableCell>
                       <TableCell className="text-right font-medium">${(item.price * item.quantity).toFixed(2)}</TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="icon" onClick={() => handleRemoveStagedItem(item.productId)} className="text-destructive hover:text-destructive hover:bg-destructive/10 h-7 w-7"><Trash2 className="h-4 w-4" /></Button>
+                        <Button variant="ghost" size="icon" onClick={() => handleRemoveStagedItem(item.productId)} className="text-destructive hover:text-destructive hover:bg-destructive/10 h-7 w-7" disabled={isSubmitting}><Trash2 className="h-4 w-4" /></Button>
                       </TableCell>
                     </TableRow>
                   ))}

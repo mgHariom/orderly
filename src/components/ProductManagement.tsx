@@ -14,13 +14,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { PlusCircle, Edit3, Trash2, PackageSearch, Loader2 } from 'lucide-react';
-// Removed useToast as it's handled by hooks
 
 interface ProductManagementProps {
   products: Product[];
-  onAddProduct: (productData: Omit<Product, 'id'>) => Promise<void>;
-  onUpdateProduct: (product: Product) => Promise<void>;
-  onDeleteProduct: (productId: string) => Promise<void>;
+  onAddProduct: (productData: Omit<Product, 'id'>) => void;
+  onUpdateProduct: (product: Product) => void;
+  onDeleteProduct: (productId: string) => void;
 }
 
 const productSchema = z.object({
@@ -48,23 +47,21 @@ export default function ProductManagement({ products, onAddProduct, onUpdateProd
     resolver: zodResolver(productSchema),
   });
 
-  const handleAddSubmit: SubmitHandler<ProductFormData> = async (data) => {
+  const handleAddSubmit: SubmitHandler<ProductFormData> = (data) => {
     setIsSubmitting(true);
-    await onAddProduct(data);
+    onAddProduct(data);
     addForm.reset({ name: "", price: 0, description: "", category: "" });
     setIsAddDialogOpen(false);
     setIsSubmitting(false);
-    // Toast handled by hook
   };
 
-  const handleEditSubmit: SubmitHandler<ProductFormData> = async (data) => {
+  const handleEditSubmit: SubmitHandler<ProductFormData> = (data) => {
     if (editingProduct) {
       setIsSubmitting(true);
-      await onUpdateProduct({ ...editingProduct, ...data });
+      onUpdateProduct({ ...editingProduct, ...data });
       setEditingProduct(null);
       setIsEditDialogOpen(false);
       setIsSubmitting(false);
-      // Toast handled by hook
     }
   };
 
@@ -74,11 +71,8 @@ export default function ProductManagement({ products, onAddProduct, onUpdateProd
     setIsEditDialogOpen(true);
   };
 
-  const handleDelete = async (productId: string) => {
-    // Confirmation dialog handles actual deletion, this is just a pre-step if needed
-    // For now, direct call
-    await onDeleteProduct(productId);
-    // Toast handled by hook
+  const handleDelete = (productId: string) => {
+    onDeleteProduct(productId);
   };
 
   return (

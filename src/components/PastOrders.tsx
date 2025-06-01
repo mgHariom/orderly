@@ -2,7 +2,7 @@
 "use client";
 
 import type { Order } from '@/lib/types';
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -10,10 +10,9 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { Label } from "@/components/ui/label";
-import { format, isValid, parseISO, isDate } from "date-fns"; // Added isDate
+import { format, isValid, parseISO, isSameDay } from "date-fns";
 import { Calendar as CalendarIcon, XCircle, History, PackageOpen } from 'lucide-react';
 import { cn } from "@/lib/utils";
-import type { Timestamp } from 'firebase/firestore';
 
 interface PastOrdersProps {
   orders: Order[];
@@ -30,22 +29,9 @@ export default function PastOrders({ orders }: PastOrdersProps) {
       let dateMatch = true;
       if (filterDate) {
         try {
-          // order.orderDate can be Date or Firestore Timestamp from the hook, or string initially
-          let orderDateToCompare: Date;
-          if (isDate(order.orderDate)) {
-            orderDateToCompare = order.orderDate as Date;
-          } else if (order.orderDate && typeof (order.orderDate as Timestamp).toDate === 'function') {
-             orderDateToCompare = (order.orderDate as Timestamp).toDate();
-          } else if (typeof order.orderDate === 'string') {
-            orderDateToCompare = parseISO(order.orderDate as string);
-          } else {
-             // If it's an unrecognized format, assume it doesn't match or handle as error
-             dateMatch = false;
-             return customerMatch && dateMatch;
-          }
-
+          const orderDateToCompare = parseISO(order.orderDate);
           if (isValid(orderDateToCompare)) {
-            dateMatch = format(orderDateToCompare, 'yyyy-MM-dd') === format(filterDate, 'yyyy-MM-dd');
+            dateMatch = isSameDay(orderDateToCompare, filterDate);
           } else {
             dateMatch = false; 
           }
@@ -55,15 +41,7 @@ export default function PastOrders({ orders }: PastOrdersProps) {
         }
       }
       return customerMatch && dateMatch;
-    }).sort((a,b) => {
-        try {
-            const dateA = isDate(a.orderDate) ? (a.orderDate as Date) : ((a.orderDate as Timestamp)?.toDate ? (a.orderDate as Timestamp).toDate() : parseISO(a.orderDate as string));
-            const dateB = isDate(b.orderDate) ? (b.orderDate as Date) : ((b.orderDate as Timestamp)?.toDate ? (b.orderDate as Timestamp).toDate() : parseISO(b.orderDate as string));
-            return dateB.getTime() - dateA.getTime();
-        } catch (e) {
-            return 0;
-        }
-    });
+    }).sort((a,b) => parseISO(b.orderDate).getTime() - parseISO(a.orderDate).getTime());
   }, [orders, filterCustomer, filterDate]);
 
   const clearFilters = () => {
@@ -71,19 +49,11 @@ export default function PastOrders({ orders }: PastOrdersProps) {
     setFilterDate(undefined);
   };
   
-  const getDisplayDate = (orderDateValue: Date | Timestamp | string): string => {
+  const getDisplayDate = (orderDateString: string): string => {
     try {
-      if (isDate(orderDateValue)) {
-        return format(orderDateValue as Date, "MMM d, yyyy - h:mm a");
-      }
-      if (orderDateValue && typeof (orderDateValue as Timestamp).toDate === 'function') {
-        return format((orderDateValue as Timestamp).toDate(), "MMM d, yyyy - h:mm a");
-      }
-      if (typeof orderDateValue === 'string') {
-        const parsed = parseISO(orderDateValue);
-        if (isValid(parsed)) {
-          return format(parsed, "MMM d, yyyy - h:mm a");
-        }
+      const parsedDate = parseISO(orderDateString);
+      if (isValid(parsedDate)) {
+        return format(parsedDate, "MMM d, yyyy - h:mm a");
       }
       return 'Invalid Date';
     } catch (e) {

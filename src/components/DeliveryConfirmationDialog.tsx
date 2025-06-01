@@ -5,7 +5,6 @@ import type { OrderItem, PendingOrder } from '@/lib/types';
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-// Removed Label as it's not used directly here, only Dialog specific labels
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { CheckCircle, Edit, AlertCircle, MinusCircle, PlusCircle, Loader2 } from 'lucide-react';
@@ -15,8 +14,8 @@ interface DeliveryConfirmationDialogProps {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
   order: PendingOrder | null;
-  onConfirmFullDelivery: (orderId: string) => Promise<void>;
-  onUpdatePendingQuantities: (orderId: string, updatedItems: OrderItem[]) => Promise<void>;
+  onConfirmFullDelivery: (orderId: string) => void;
+  onUpdatePendingQuantities: (orderId: string, updatedItems: OrderItem[]) => void;
 }
 
 export default function DeliveryConfirmationDialog({
@@ -32,11 +31,12 @@ export default function DeliveryConfirmationDialog({
 
   useEffect(() => {
     if (order) {
+      // Deep copy to avoid mutating the original order object
       setEditedItems(JSON.parse(JSON.stringify(order.items))); 
     } else {
       setEditedItems([]);
     }
-  }, [order, isOpen]);
+  }, [order, isOpen]); // Re-initialize when dialog opens or order changes
 
   const handleQuantityChange = (productId: string, newQuantity: number) => {
     setEditedItems(prevItems =>
@@ -46,48 +46,51 @@ export default function DeliveryConfirmationDialog({
     );
   };
 
-  const handleConfirmDelivery = async () => {
+  const handleConfirmDelivery = () => {
     if (!order) return;
     setIsProcessing(true);
-    await onConfirmFullDelivery(order.id);
+    onConfirmFullDelivery(order.id);
     setIsProcessing(false);
     onOpenChange(false);
-    // Toast handled by parent after successful Firestore operations
+    // Toast for success handled by OrderFlowApp
   };
 
-  const handleUpdatePending = async () => {
+  const handleUpdatePending = () => {
     if (!order) return;
     setIsProcessing(true);
     const validUpdatedItems = editedItems.filter(item => item.quantity > 0);
     const itemsWithZeroQuantity = editedItems.filter(item => item.quantity === 0);
+    const originalItemCount = order.items.length;
 
-    await onUpdatePendingQuantities(order.id, validUpdatedItems);
+    onUpdatePendingQuantities(order.id, validUpdatedItems);
     setIsProcessing(false);
     onOpenChange(false);
 
-    // Toast logic remains client-side as it's about the immediate UI feedback of this dialog
-    if (itemsWithZeroQuantity.length > 0 && validUpdatedItems.length === 0 && editedItems.length > 0) {
+    if (itemsWithZeroQuantity.length > 0 && validUpdatedItems.length === 0 && originalItemCount > 0) {
          toast({
-            title: "Order Cleared",
+            title: "Order Cleared from Pending",
             description: `All items in ${order.customerName}'s order were set to 0 pending. The order has been cleared from the queue.`,
             variant: "default"
         });
-    } else if (validUpdatedItems.length < editedItems.length && validUpdatedItems.length > 0) {
+    } else if (validUpdatedItems.length < originalItemCount && validUpdatedItems.length > 0) {
          toast({
             title: "Pending Order Updated",
             description: `Pending items for ${order.customerName} updated. Some items were cleared.`,
             variant: "default"
         });
-    } else if (validUpdatedItems.length === editedItems.length && editedItems.length > 0) {
+    } else if (validUpdatedItems.length === originalItemCount && originalItemCount > 0 && JSON.stringify(editedItems) !== JSON.stringify(order.items) ) {
          toast({
             title: "Pending Order Updated",
             description: `Pending quantities for ${order.customerName} updated.`,
             variant: "default"
         });
     }
+    // If no changes were made, no toast is shown.
   };
   
   const allItemsPendingZero = editedItems.every(item => item.quantity === 0);
+  const noChangesMade = order && JSON.stringify(editedItems) === JSON.stringify(order.items);
+
 
   if (!order) return null;
 
@@ -110,11 +113,13 @@ export default function DeliveryConfirmationDialog({
                   <TableRow>
                     <TableHead>Product</TableHead>
                     <TableHead className="text-center w-1/3">New Pending Quantity</TableHead>
-                    <TableHead className="text-right hidden sm:table-cell">Price/Item</TableHead>
+                    <TableHead className="text-right hidden sm:table-cell">Original Qty</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {editedItems.map(item => (
+                  {editedItems.map(item => {
+                    const originalItem = order.items.find(oi => oi.productId === item.productId);
+                    return (
                     <TableRow key={item.productId}>
                       <TableCell className="font-medium">{item.productName}</TableCell>
                       <TableCell className="text-center">
@@ -135,9 +140,10 @@ export default function DeliveryConfirmationDialog({
                             </Button>
                         </div>
                       </TableCell>
-                      <TableCell className="text-right hidden sm:table-cell">${item.price.toFixed(2)}</TableCell>
+                      <TableCell className="text-right hidden sm:table-cell">{originalItem?.quantity || 'N/A'}</TableCell>
                     </TableRow>
-                  ))}
+                  );
+                  })}
                 </TableBody>
               </Table>
             </div>
@@ -155,11 +161,19 @@ export default function DeliveryConfirmationDialog({
 
         <DialogFooter className="gap-2 sm:gap-0">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isProcessing}>Cancel</Button>
-          <Button onClick={handleUpdatePending} variant="secondary" disabled={(!editedItems.length && !order.items.length) || isProcessing}>
+          <Button 
+            onClick={handleUpdatePending} 
+            variant="secondary" 
+            disabled={(!editedItems.length && !order.items.length) || isProcessing || noChangesMade}
+          >
              {isProcessing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
              <Edit className="mr-2 h-4 w-4" /> Update Pending Order
           </Button>
-          <Button onClick={handleConfirmDelivery} className="bg-green-600 hover:bg-green-700 text-white" disabled={!order.items.length || isProcessing}>
+          <Button 
+            onClick={handleConfirmDelivery} 
+            className="bg-green-600 hover:bg-green-700 text-white" 
+            disabled={!order.items.length || isProcessing || allItemsPendingZero} // Disable if all items are zeroed out
+          >
             {isProcessing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             <CheckCircle className="mr-2 h-4 w-4" /> Mark Fully Delivered & Save
           </Button>

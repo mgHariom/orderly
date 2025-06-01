@@ -2,10 +2,7 @@
 "use client";
 
 import type { Product, OrderItem, PendingOrder as PendingOrderType, Order as OrderType } from '@/lib/types';
-import { useState, useEffect, useCallback } from 'react';
-import { useProducts } from '@/hooks/useProducts';
-import { usePendingOrders } from '@/hooks/usePendingOrders';
-import { useOrders } from '@/hooks/useOrders';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Header from '@/components/Header';
 import ProductManagement from '@/components/ProductManagement';
 import OrderCreation from '@/components/OrderCreation';
@@ -14,31 +11,67 @@ import DeliveryConfirmationDialog from '@/components/DeliveryConfirmationDialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ShoppingCart, PackageSearch, HistoryIcon, UserCircle, WorkflowIcon, Trash2, Edit, Loader2 } from 'lucide-react';
+import { ShoppingCart, PackageSearch, HistoryIcon, UserCircle, Edit, Trash2, Loader2 } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
-import { format, Timestamp } from 'date-fns';
+import { format, parseISO, differenceInMilliseconds } from 'date-fns';
+import { getLocalStorageItem, setLocalStorageItem } from '@/lib/localStorage';
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 
 export default function OrderFlowApp() {
   const { toast } = useToast();
 
-  const { products, isLoadingProducts, addProduct, updateProduct, deleteProduct } = useProducts();
-  const { pendingOrders, isLoadingPendingOrders, addPendingOrder, updatePendingOrder, deletePendingOrder } = usePendingOrders();
-  const { orders, isLoadingOrders, addOrder } = useOrders();
+  const [products, setProducts] = useState<Product[]>([]);
+  const [pendingOrders, setPendingOrders] = useState<PendingOrderType[]>([]);
+  const [orders, setOrders] = useState<OrderType[]>([]);
   
+  const [isLoadingProducts, setIsLoadingProducts] = useState(true);
+  const [isLoadingPendingOrders, setIsLoadingPendingOrders] = useState(true);
+  const [isLoadingOrders, setIsLoadingOrders] = useState(true);
+
   const [initialAgedOrderCheckDone, setInitialAgedOrderCheckDone] = useState(false);
   const [isDeliveryDialogOpen, setIsDeliveryDialogOpen] = useState(false);
   const [selectedPendingOrderForDialog, setSelectedPendingOrderForDialog] = useState<PendingOrderType | null>(null);
+
+  // Load data from localStorage on mount
+  useEffect(() => {
+    setProducts(getLocalStorageItem<Product[]>('products', []));
+    setIsLoadingProducts(false);
+    setPendingOrders(getLocalStorageItem<PendingOrderType[]>('pendingOrders', []));
+    setIsLoadingPendingOrders(false);
+    setOrders(getLocalStorageItem<OrderType[]>('orders', []));
+    setIsLoadingOrders(false);
+  }, []);
+
+  // Save products to localStorage
+  useEffect(() => {
+    if (!isLoadingProducts) {
+      setLocalStorageItem('products', products);
+    }
+  }, [products, isLoadingProducts]);
+
+  // Save pending orders to localStorage
+  useEffect(() => {
+    if (!isLoadingPendingOrders) {
+      setLocalStorageItem('pendingOrders', pendingOrders);
+    }
+  }, [pendingOrders, isLoadingPendingOrders]);
+
+  // Save orders to localStorage
+  useEffect(() => {
+    if (!isLoadingOrders) {
+      setLocalStorageItem('orders', orders);
+    }
+  }, [orders, isLoadingOrders]);
+
 
   useEffect(() => {
     if (!isLoadingOrders && orders.length > 0 && !initialAgedOrderCheckDone) {
       const now = Date.now();
       orders.forEach(order => {
         try {
-          // Ensure orderDate is a JS Date object for comparison
-          const orderDate = order.orderDate instanceof Date ? order.orderDate : (order.orderDate as any).toDate();
-          if (now - orderDate.getTime() > TWENTY_FOUR_HOURS_MS) {
+          const orderDate = parseISO(order.orderDate);
+          if (differenceInMilliseconds(now, orderDate) > TWENTY_FOUR_HOURS_MS) {
             toast({
               title: "Aged Order Alert",
               description: `Order for ${order.customerName} (ID: ...${order.id.slice(-6)}) placed on ${format(orderDate, "MMM d, yyyy 'at' h:mm a")} is older than 24 hours.`,
@@ -54,34 +87,30 @@ export default function OrderFlowApp() {
     }
   }, [orders, isLoadingOrders, initialAgedOrderCheckDone, toast]);
 
-  const handleAddProduct = useCallback(async (productData: Omit<Product, 'id' | 'category'> & { category?: string }) => {
-    try {
-      await addProduct({ ...productData, category: productData.category || '' });
-      // Toast is handled in useProducts hook
-    } catch (error) {
-      console.error("Failed to add product:", error);
-    }
-  }, [addProduct]);
+  const handleAddProduct = useCallback((productData: Omit<Product, 'id' | 'category'> & { category?: string }) => {
+    const newProduct: Product = { 
+        id: crypto.randomUUID(), 
+        ...productData, 
+        category: productData.category || '' 
+    };
+    setProducts(prev => [...prev, newProduct].sort((a, b) => a.name.localeCompare(b.name)));
+    toast({ title: "Product Added", description: `${newProduct.name} has been added.` });
+  }, [toast]);
 
-  const handleUpdateProduct = useCallback(async (updatedProduct: Product) => {
-    try {
-      await updateProduct(updatedProduct);
-      // Toast is handled in useProducts hook
-    } catch (error) {
-      console.error("Failed to update product:", error);
-    }
-  }, [updateProduct]);
+  const handleUpdateProduct = useCallback((updatedProduct: Product) => {
+    setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p).sort((a, b) => a.name.localeCompare(b.name)));
+    toast({ title: "Product Updated", description: `${updatedProduct.name} has been updated.` });
+  }, [toast]);
 
-  const handleDeleteProduct = useCallback(async (productId: string) => {
-    try {
-      await deleteProduct(productId);
-      // Toast is handled in useProducts hook
-    } catch (error) {
-      console.error("Failed to delete product:", error);
+  const handleDeleteProduct = useCallback((productId: string) => {
+    const productToDelete = products.find(p => p.id === productId);
+    setProducts(prev => prev.filter(p => p.id !== productId));
+    if (productToDelete) {
+      toast({ title: "Product Deleted", description: `${productToDelete.name} has been deleted.`, variant: "destructive" });
     }
-  }, [deleteProduct]);
+  }, [products, toast]);
 
-  const handleAddItemsToPendingList = useCallback(async (customerName: string, itemsToAdd: OrderItem[]) => {
+  const handleAddItemsToPendingList = useCallback((customerName: string, itemsToAdd: OrderItem[]) => {
     if (!customerName.trim()) {
       toast({ title: "Customer Name Required", description: "Please ensure a customer name is set.", variant: "destructive" });
       return;
@@ -92,81 +121,70 @@ export default function OrderFlowApp() {
     }
 
     const totalAmount = itemsToAdd.reduce((total, item) => total + (item.price * item.quantity), 0);
-    try {
-      await addPendingOrder({
+    const newPendingOrder: PendingOrderType = {
+        id: crypto.randomUUID(),
         customerName,
         items: itemsToAdd,
         totalAmount,
-      });
-      // Toast is handled in usePendingOrders hook
-    } catch (error) {
-      console.error("Failed to add to pending list:", error);
-    }
-  }, [addPendingOrder, toast]);
+        createdAt: new Date().toISOString(),
+    };
+    setPendingOrders(prev => [newPendingOrder, ...prev].sort((a,b) => parseISO(b.createdAt).getTime() - parseISO(a.createdAt).getTime()));
+    toast({ title: "Order Batch Added to Queue", description: `Batch for ${customerName} added to pending orders.` });
+  }, [toast]);
   
   const handleOpenDeliveryDialog = (pendingOrder: PendingOrderType) => {
     setSelectedPendingOrderForDialog(pendingOrder);
     setIsDeliveryDialogOpen(true);
   };
 
-  const handleConfirmFullDelivery = useCallback(async (pendingOrderId: string) => {
+  const handleConfirmFullDelivery = useCallback((pendingOrderId: string) => {
     const orderToSave = pendingOrders.find(po => po.id === pendingOrderId);
     if (!orderToSave) {
       toast({ title: "Error", description: "Could not find the order to save.", variant: "destructive" });
       return;
     }
 
-    try {
-      await addOrder({
+    const newOrder: OrderType = {
+        id: crypto.randomUUID(),
         customerName: orderToSave.customerName,
         items: orderToSave.items,
         totalAmount: orderToSave.totalAmount,
-        // category determination (if any) would go here
-      });
-      await deletePendingOrder(pendingOrderId);
-      
-      toast({ title: "Order Fully Delivered!", description: `Order for ${orderToSave.customerName} marked as delivered and saved to past orders.` });
-      setSelectedPendingOrderForDialog(null);
-    } catch (error) {
-      console.error("Error confirming full delivery:", error);
-      toast({ title: "Delivery Error", description: "Could not confirm full delivery.", variant: "destructive" });
-    }
-  }, [pendingOrders, addOrder, deletePendingOrder, toast]);
+        orderDate: new Date().toISOString(),
+        // category determination (if any) would go here if re-added
+    };
+    setOrders(prev => [newOrder, ...prev].sort((a,b) => parseISO(b.orderDate).getTime() - parseISO(a.orderDate).getTime()));
+    setPendingOrders(prev => prev.filter(po => po.id !== pendingOrderId));
+    
+    toast({ title: "Order Fully Delivered!", description: `Order for ${orderToSave.customerName} marked as delivered and saved to past orders.` });
+    setSelectedPendingOrderForDialog(null);
+  }, [pendingOrders, toast]);
 
-  const handleUpdatePendingOrderQuantities = useCallback(async (pendingOrderId: string, updatedItems: OrderItem[]) => {
+  const handleUpdatePendingOrderQuantities = useCallback((pendingOrderId: string, updatedItems: OrderItem[]) => {
     const orderToUpdate = pendingOrders.find(po => po.id === pendingOrderId);
     if (!orderToUpdate) return;
 
-    try {
-      if (updatedItems.length === 0) { // All items were set to 0 quantity
-        await deletePendingOrder(pendingOrderId);
-        toast({
-            title: "Order Cleared",
-            description: `All items in ${orderToUpdate.customerName}'s order were set to 0 pending. The order has been cleared from the queue.`,
-        });
-      } else {
-        const newTotalAmount = updatedItems.reduce((total, item) => total + (item.price * item.quantity), 0);
-        await updatePendingOrder({ id: pendingOrderId, items: updatedItems, totalAmount: newTotalAmount });
-         // Toast is handled in DeliveryConfirmationDialog for this case
-      }
-      setSelectedPendingOrderForDialog(null);
-    } catch (error) {
-      console.error("Error updating pending quantities:", error);
-      toast({ title: "Update Error", description: "Could not update pending quantities.", variant: "destructive" });
+    if (updatedItems.length === 0) { // All items were set to 0 quantity
+      setPendingOrders(prev => prev.filter(po => po.id !== pendingOrderId));
+      toast({
+          title: "Order Cleared",
+          description: `All items in ${orderToUpdate.customerName}'s order were set to 0 pending. The order has been cleared from the queue.`,
+      });
+    } else {
+      const newTotalAmount = updatedItems.reduce((total, item) => total + (item.price * item.quantity), 0);
+      setPendingOrders(prev => prev.map(po => 
+        po.id === pendingOrderId ? { ...po, items: updatedItems, totalAmount: newTotalAmount } : po
+      ).sort((a,b) => parseISO(b.createdAt).getTime() - parseISO(a.createdAt).getTime()));
+       // Toast is handled in DeliveryConfirmationDialog for this case (or it can be moved here too)
     }
-  }, [pendingOrders, updatePendingOrder, deletePendingOrder, toast]);
+    setSelectedPendingOrderForDialog(null);
+  }, [pendingOrders, toast]);
 
-  const handleRemovePendingOrder = useCallback(async (pendingOrderId: string) => {
+  const handleRemovePendingOrder = useCallback((pendingOrderId: string) => {
     const orderToRemove = pendingOrders.find(po => po.id === pendingOrderId);
     if (!orderToRemove) return;
-    try {
-      await deletePendingOrder(pendingOrderId);
-      toast({ title: "Pending Order Removed", description: `Pending order for ${orderToRemove.customerName} has been removed.`, variant: "destructive" });
-    } catch (error) {
-      console.error("Error removing pending order:", error);
-      toast({ title: "Removal Error", description: "Could not remove pending order.", variant: "destructive" });
-    }
-  }, [pendingOrders, deletePendingOrder, toast]);
+    setPendingOrders(prev => prev.filter(po => po.id !== pendingOrderId));
+    toast({ title: "Pending Order Removed", description: `Pending order for ${orderToRemove.customerName} has been removed.`, variant: "destructive" });
+  }, [pendingOrders, toast]);
 
   if (isLoadingProducts || isLoadingPendingOrders || isLoadingOrders) {
     return (
