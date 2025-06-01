@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { Product, OrderItem, Order } from '@/lib/types';
 import { getLocalStorageItem, setLocalStorageItem } from '@/lib/localStorage';
 import Header from '@/components/Header';
@@ -9,7 +9,7 @@ import ProductManagement from '@/components/ProductManagement';
 import OrderCreation from '@/components/OrderCreation';
 import PastOrders from '@/components/PastOrders';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ShoppingCart, PackagePlus, HistoryIcon, WorkflowIcon, PackageSearch } from 'lucide-react';
+import { ShoppingCart, PackageSearch, HistoryIcon, WorkflowIcon } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import { format } from 'date-fns';
 
@@ -22,11 +22,13 @@ export default function OrderFlowApp() {
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   
-  const [currentOrderItems, setCurrentOrderItems] = useState<OrderItem[]>([]);
-  const [currentCustomerName, setCurrentCustomerName] = useState<string>('');
   const [isSavingOrder, setIsSavingOrder] = useState(false);
   const [isClient, setIsClient] = useState(false);
   const [initialAgedOrderCheckDone, setInitialAgedOrderCheckDone] = useState(false);
+
+  // State for OrderCreation to reset itself
+  const [orderCreationKey, setOrderCreationKey] = useState(Date.now());
+
 
   useEffect(() => {
     setIsClient(true);
@@ -51,7 +53,7 @@ export default function OrderFlowApp() {
               title: "Aged Order Alert",
               description: `Order for ${order.customerName} (ID: ...${order.id.slice(-6)}) placed on ${format(new Date(order.orderDate), "MMM d, yyyy 'at' h:mm a")} is older than 24 hours.`,
               variant: "default", 
-              duration: 7000, // Keep notification for 7 seconds
+              duration: 7000, 
             });
           }
         } catch (e) {
@@ -73,79 +75,69 @@ export default function OrderFlowApp() {
 
   const handleAddProduct = useCallback((productData: Omit<Product, 'id' | 'category'> & { category?: string }) => {
     setProducts(prev => [...prev, { ...productData, id: crypto.randomUUID(), category: productData.category || '' }]);
-  }, []);
+    toast({ title: "Product Added", description: `${productData.name} has been added to the catalog.`});
+  }, [toast]);
 
   const handleUpdateProduct = useCallback((updatedProduct: Product) => {
     setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
-  }, []);
-
-  const handleDeleteProduct = useCallback((productId: string) => {
-    setProducts(prev => prev.filter(p => p.id !== productId));
-    // Also remove from current order if it exists there (edge case, but good to handle)
-    setCurrentOrderItems(prevItems => prevItems.filter(item => item.productId !== productId));
-  }, []);
-
-  // Now accepts a full OrderItem
-  const handleAddItemToOrder = useCallback((newItem: OrderItem) => {
-    setCurrentOrderItems(prevItems => {
-      const existingItemIndex = prevItems.findIndex(item => item.productId === newItem.productId);
-      if (existingItemIndex > -1) {
-        const updatedItems = [...prevItems];
-        updatedItems[existingItemIndex].quantity += newItem.quantity;
-        toast({ title: "Quantity Updated", description: `${newItem.productName} quantity increased to ${updatedItems[existingItemIndex].quantity}.` });
-        return updatedItems;
-      } else {
-        toast({ title: "Item Added", description: `${newItem.productName} (x${newItem.quantity}) added to order.` });
-        return [...prevItems, newItem];
-      }
-    });
+    toast({ title: "Product Updated", description: `${updatedProduct.name} has been updated.`});
   }, [toast]);
 
-  const handleUpdateItemQuantity = useCallback((productId: string, quantity: number) => {
-    setCurrentOrderItems(prevItems => 
-      prevItems.map(item => 
-        item.productId === productId ? { ...item, quantity: Math.max(1, quantity) } : item
-      )
-    );
-  }, []);
+  const handleDeleteProduct = useCallback((productId: string) => {
+    const product = products.find(p => p.id === productId);
+    setProducts(prev => prev.filter(p => p.id !== productId));
+    toast({ title: "Product Deleted", description: `${product?.name || 'Product'} has been deleted.`, variant: "destructive" });
+  }, [products, toast]);
 
-  const handleRemoveItemFromOrder = useCallback((productId: string) => {
-    const item = currentOrderItems.find(i => i.productId === productId);
-    setCurrentOrderItems(prevItems => prevItems.filter(item => item.productId !== productId));
-    if (item) {
-        toast({ title: "Item Removed", description: `${item.productName} removed from order.`, variant: "destructive" });
-    }
-  }, [currentOrderItems, toast]);
 
-  const currentOrderTotal = useMemo(() => {
-    return currentOrderItems.reduce((total, item) => total + (item.price * item.quantity), 0);
-  }, [currentOrderItems]);
-
-  const handleSaveOrder = useCallback(async () => {
-    if (!currentCustomerName.trim()) {
+  const handleSaveOrder = useCallback(async (orderData: { customerName: string; items: OrderItem[] }) => {
+    if (!orderData.customerName.trim()) {
        toast({ title: "Customer Name Required", description: "Please enter a customer name.", variant: "destructive" });
        return;
     }
-    if (currentOrderItems.length === 0) {
+    if (orderData.items.length === 0) {
        toast({ title: "Empty Order", description: "Cannot save an empty order.", variant: "destructive" });
        return;
     }
     setIsSavingOrder(true);
     await new Promise(resolve => setTimeout(resolve, 300)); 
 
+    const totalAmount = orderData.items.reduce((total, item) => total + (item.price * item.quantity), 0);
+    
+    let orderCategory: string | undefined = undefined;
+    for (const item of orderData.items) {
+      const productDetails = products.find(p => p.id === item.productId);
+      if (productDetails && productDetails.category) {
+        orderCategory = productDetails.category;
+        break; 
+      }
+    }
+
     const newOrder: Order = {
       id: crypto.randomUUID(),
-      customerName: currentCustomerName,
-      items: currentOrderItems,
-      totalAmount: currentOrderTotal,
+      customerName: orderData.customerName,
+      items: orderData.items,
+      totalAmount: totalAmount,
       orderDate: new Date().toISOString(),
+      category: orderCategory,
     };
     setOrders(prevOrders => [newOrder, ...prevOrders].sort((a,b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime()));
-    setCurrentOrderItems([]);
-    setCurrentCustomerName('');
+    
     setIsSavingOrder(false);
     toast({ title: "Order Saved!", description: `Order for ${newOrder.customerName} has been successfully saved.` });
-  }, [currentCustomerName, currentOrderItems, currentOrderTotal, toast]);
+    
+    // Trigger re-render of OrderCreation to reset its internal state
+    setOrderCreationKey(Date.now());
+
+  }, [products, toast]);
+
+  const handleOrderCreationReset = useCallback(() => {
+    // This function is passed to OrderCreation and called internally by it after a successful save
+    // to signal OrderFlowApp that it can clear relevant states or trigger resets.
+    // In this new setup, we re-key OrderCreation to force a reset.
+    setOrderCreationKey(Date.now());
+  }, []);
+
 
   if (!isClient) {
     return (
@@ -179,16 +171,11 @@ export default function OrderFlowApp() {
           
           <TabsContent value="create-order" className="mt-0">
             <OrderCreation
+              key={orderCreationKey} // Re-key to reset state after save
               products={products}
-              currentOrderItems={currentOrderItems}
-              customerName={currentCustomerName}
-              onSetCustomerName={setCurrentCustomerName}
-              onAddItemToOrder={handleAddItemToOrder}
-              onUpdateItemQuantity={handleUpdateItemQuantity}
-              onRemoveItemFromOrder={handleRemoveItemFromOrder}
-              orderTotal={currentOrderTotal}
               onSaveOrder={handleSaveOrder}
               isSaving={isSavingOrder}
+              onOrderSaved={handleOrderCreationReset} // Pass reset callback
             />
           </TabsContent>
           <TabsContent value="manage-products" className="mt-0">
@@ -200,7 +187,7 @@ export default function OrderFlowApp() {
             />
           </TabsContent>
           <TabsContent value="past-orders" className="mt-0">
-            <PastOrders orders={orders} />
+            <PastOrders orders={orders} products={products} />
           </TabsContent>
         </Tabs>
       </main>

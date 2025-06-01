@@ -4,7 +4,7 @@ export interface Product {
   name: string;
   price: number;
   description?: string;
-  category?: string; // Added category
+  category?: string;
 }
 
 export interface OrderItem {
@@ -12,6 +12,9 @@ export interface OrderItem {
   productName: string;
   quantity: number;
   price: number;
+  // Product category can be looked up from Product[] using productId when needed
+  // or could be denormalized here if frequently accessed without product context.
+  // For now, we'll look it up.
 }
 
 export interface Order {
@@ -20,4 +23,5 @@ export interface Order {
   items: OrderItem[];
   totalAmount: number;
   orderDate: string; // ISO string format
+  category?: string; // Added category for the order
 }
