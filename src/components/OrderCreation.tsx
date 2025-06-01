@@ -9,13 +9,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { PlusCircle, Trash2, MinusCircle, PackagePlus, ListChecks } from 'lucide-react'; // Changed ListPlus to ListChecks
+import { PlusCircle, Trash2, MinusCircle, PackagePlus, ListChecks } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 
 interface OrderCreationProps {
   products: Product[];
   onAddItemsToPendingList: (customerName: string, items: OrderItem[]) => void;
-  // stagedItems and setStagedItems are removed as props, managed locally
 }
 
 export default function OrderCreation({
@@ -30,11 +29,11 @@ export default function OrderCreation({
 
   const handleStageItem = () => {
     if (!currentCustomerName.trim()) {
-      toast({ title: "Customer Name Required", description: "Please enter a customer name for this staging session.", variant: "destructive" });
+      toast({ title: "Customer Name Required", description: "Please enter a customer name for this batch of items.", variant: "destructive" });
       return;
     }
     if (!selectedProductId) {
-      toast({ title: "Select Product", description: "Please select a product to stage.", variant: "destructive" });
+      toast({ title: "Select Product", description: "Please select a product to add to the batch.", variant: "destructive" });
       return;
     }
     if (quantity <= 0) {
@@ -52,14 +51,14 @@ export default function OrderCreation({
       if (existingItemIndex > -1) {
         const updatedItems = [...prevItems];
         updatedItems[existingItemIndex].quantity += quantity;
-        toast({ title: "Quantity Updated", description: `${product.name} quantity increased to ${updatedItems[existingItemIndex].quantity} for ${currentCustomerName}.` });
+        toast({ title: "Quantity Updated", description: `${product.name} quantity increased to ${updatedItems[existingItemIndex].quantity} in ${currentCustomerName}'s batch.` });
         return updatedItems;
       } else {
-        toast({ title: "Item Staged", description: `${product.name} (x${quantity}) staged for ${currentCustomerName}.` });
+        toast({ title: "Item Added to Batch", description: `${product.name} (x${quantity}) added to ${currentCustomerName}'s current batch.` });
         return [...prevItems, { productId: product.id, productName: product.name, quantity, price: product.price }];
       }
     });
-    setSelectedProductId(''); 
+    setSelectedProductId('');
     setQuantity(1);
   };
 
@@ -71,26 +70,25 @@ export default function OrderCreation({
     const item = stagedItems.find(i => i.productId === productId);
     setStagedItems(prev => prev.filter(item => item.productId !== productId));
     if (item) {
-        toast({ title: "Item Unstaged", description: `${item.productName} removed from current staging area.`, variant: "destructive" });
+        toast({ title: "Item Removed from Batch", description: `${item.productName} removed from ${currentCustomerName}'s current batch.`, variant: "destructive" });
     }
   };
-  
+
   const handleAddAllStagedToPendingList = () => {
     if (!currentCustomerName.trim()) {
-      toast({ title: "Customer Name Missing", description: "Please enter a customer name before adding to the pending list.", variant: "destructive" });
+      toast({ title: "Customer Name Missing", description: "Please enter a customer name before adding the batch to the pending list.", variant: "destructive" });
       return;
     }
     if (stagedItems.length === 0) {
-      toast({ title: "No Items Staged", description: "Please stage items before adding to the pending list.", variant: "destructive" });
+      toast({ title: "No Items in Batch", description: "Please add items to the current batch before adding to the pending list.", variant: "destructive" });
       return;
     }
     onAddItemsToPendingList(currentCustomerName, stagedItems);
-    // Clear local state after successfully adding to pending list
     setCurrentCustomerName('');
     setStagedItems([]);
-    toast({ title: "Staging Cleared", description: "Customer name and staged items cleared for next entry." });
+    toast({ title: "Batch Added to Queue", description: `Batch for ${currentCustomerName} sent to pending orders queue. Ready for next customer.` });
   };
-  
+
   const canDecreaseStagedQuantity = (productId: string) => {
     const item = stagedItems.find(item => item.productId === productId);
     return item ? item.quantity > 1 : false;
@@ -103,16 +101,16 @@ export default function OrderCreation({
   return (
     <Card className="shadow-lg">
       <CardHeader>
-        <CardTitle className="font-headline flex items-center"><PackagePlus className="mr-2 h-5 w-5 text-primary" /> Stage Items for a Customer</CardTitle>
+        <CardTitle className="font-headline flex items-center"><PackagePlus className="mr-2 h-5 w-5 text-primary" /> Create Item Batch for a Customer</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="space-y-4 p-4 border rounded-md bg-card shadow-sm">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-            <div className="md:col-span-3"> {/* Customer name full width */}
+            <div className="md:col-span-3">
               <Label htmlFor="customerNameStaging">Customer Name</Label>
               <Input
                   id="customerNameStaging"
-                  placeholder="Enter customer name for this batch of items"
+                  placeholder="Enter customer name for this batch"
                   value={currentCustomerName}
                   onChange={(e) => setCurrentCustomerName(e.target.value)}
               />
@@ -144,13 +142,13 @@ export default function OrderCreation({
             </div>
           </div>
           <Button onClick={handleStageItem} className="mt-3 w-full md:w-auto" disabled={products.length === 0 || !selectedProductId || !currentCustomerName.trim()}>
-            <PlusCircle className="mr-2 h-4 w-4" /> Add Item to This Customer's Staging Area
+            <PlusCircle className="mr-2 h-4 w-4" /> Add Product to {currentCustomerName || "Customer"}'s Batch
           </Button>
         </div>
 
         {stagedItems.length > 0 && (
           <div>
-            <h3 className="text-lg font-medium mb-2">Staged Items for: <span className="text-primary">{currentCustomerName || "..."}</span></h3>
+            <h3 className="text-lg font-medium mb-2">Current Batch for: <span className="text-primary">{currentCustomerName || "..."}</span></h3>
             <div className="border rounded-md overflow-hidden shadow-sm">
               <Table>
                 <TableHeader>
@@ -184,17 +182,21 @@ export default function OrderCreation({
               </Table>
             </div>
             <div className="flex flex-col sm:flex-row items-center justify-between mt-4 space-y-2 sm:space-y-0">
-                <p className="text-xl font-semibold">Staging Total for {currentCustomerName || "..."}: <span className="text-accent">${stagedItemsTotal.toFixed(2)}</span></p>
+                <p className="text-xl font-semibold">Batch Total for {currentCustomerName || "..."}: <span className="text-accent">${stagedItemsTotal.toFixed(2)}</span></p>
                 <Button onClick={handleAddAllStagedToPendingList} size="lg" disabled={stagedItems.length === 0 || !currentCustomerName.trim()}>
-                    <ListChecks className="mr-2 h-5 w-5" /> Add to Pending Orders Queue
+                    <ListChecks className="mr-2 h-5 w-5" /> Add This Batch to Pending Orders Queue
                 </Button>
             </div>
           </div>
         )}
-         {stagedItems.length === 0 && (
-            <p className="text-muted-foreground text-center py-3 bg-muted/30 rounded-md">No items currently staged for <span className="text-primary">{currentCustomerName || "the active customer"}</span>. Add customer name and items using the form above.</p>
+         {stagedItems.length === 0 && currentCustomerName.trim() && (
+            <p className="text-muted-foreground text-center py-3 bg-muted/30 rounded-md">No items currently in the batch for <span className="text-primary">{currentCustomerName}</span>. Add products using the form above.</p>
+         )}
+         {stagedItems.length === 0 && !currentCustomerName.trim() && (
+            <p className="text-muted-foreground text-center py-3 bg-muted/30 rounded-md">Enter a customer name and add products to start a new batch.</p>
          )}
       </CardContent>
     </Card>
   );
 }
+
