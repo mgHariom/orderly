@@ -11,8 +11,8 @@ import PastOrders from '@/components/PastOrders';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ShoppingCart, PackageSearch, HistoryIcon, UserCircle, WorkflowIcon, CheckCircle2, ListPlus } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
+import { ShoppingCart, PackageSearch, HistoryIcon, UserCircle, WorkflowIcon, CheckCircle2 } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import { format } from 'date-fns';
 
@@ -133,6 +133,13 @@ export default function OrderFlowApp() {
       items: currentItems,
       totalAmount: totalAmount,
       orderDate: new Date().toISOString(),
+      // category: currentItems.length > 0 ? (currentItems.find(item => {
+      //   const product = products.find(p => p.id === item.productId);
+      //   return product && product.category;
+      // }) ? products.find(p => p.id === (currentItems.find(item => {
+      //   const product = products.find(p => p.id === item.productId);
+      //   return product && product.category;
+      // }) as OrderItem).productId)?.category : undefined) : undefined,
     };
     setOrders(prevOrders => [newOrder, ...prevOrders].sort((a,b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime()));
     
@@ -143,7 +150,7 @@ export default function OrderFlowApp() {
     setCurrentCustomerName('');
     setCurrentItems([]);
     setStagedItems([]); // Also clear any remaining staged items, though should be clear
-  }, [currentCustomerName, currentItems, toast]);
+  }, [currentCustomerName, currentItems, toast, products]);
 
   const currentOrderTotal = useMemo(() => {
     return currentItems.reduce((total, item) => total + (item.price * item.quantity), 0);
@@ -243,3 +250,5 @@ export default function OrderFlowApp() {
     </div>
   );
 }
+
+    
