@@ -2,7 +2,7 @@
 "use client";
 
 import type { Product, OrderItem, PendingOrder as PendingOrderType, Order as OrderType } from '@/lib/types';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Header from '@/components/Header';
 import ProductManagement from '@/components/ProductManagement';
 import OrderCreation from '@/components/OrderCreation';
@@ -11,7 +11,7 @@ import DeliveryConfirmationDialog from '@/components/DeliveryConfirmationDialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ShoppingCart, PackageSearch, HistoryIcon, UserCircle, Edit, Trash2, Loader2 } from 'lucide-react';
+import { ShoppingCart, PackageSearch, HistoryIcon, UserCircle, Edit, Trash2, Loader2, AlertTriangle } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import { format, parseISO, differenceInMilliseconds } from 'date-fns';
 import { getLocalStorageItem, setLocalStorageItem } from '@/lib/localStorage';
@@ -24,7 +24,7 @@ export default function OrderFlowApp() {
   const [products, setProducts] = useState<Product[]>([]);
   const [pendingOrders, setPendingOrders] = useState<PendingOrderType[]>([]);
   const [orders, setOrders] = useState<OrderType[]>([]);
-  
+
   const [isLoadingProducts, setIsLoadingProducts] = useState(true);
   const [isLoadingPendingOrders, setIsLoadingPendingOrders] = useState(true);
   const [isLoadingOrders, setIsLoadingOrders] = useState(true);
@@ -37,9 +37,19 @@ export default function OrderFlowApp() {
   useEffect(() => {
     setProducts(getLocalStorageItem<Product[]>('products', []));
     setIsLoadingProducts(false);
-    setPendingOrders(getLocalStorageItem<PendingOrderType[]>('pendingOrders', []));
+    
+    // Ensure loaded pending orders have originalItems and originalTotalAmount
+    const loadedPendingOrders = getLocalStorageItem<PendingOrderType[]>('pendingOrders', []);
+    const processedPendingOrders = loadedPendingOrders.map(po => ({
+      ...po,
+      originalItems: po.originalItems || po.items, // Fallback for older data
+      originalTotalAmount: po.originalTotalAmount || po.items.reduce((sum, item) => sum + item.price * item.quantity, 0) // Fallback
+    }));
+    setPendingOrders(processedPendingOrders);
     setIsLoadingPendingOrders(false);
-    setOrders(getLocalStorageItem<OrderType[]>('orders', []));
+
+    const loadedOrders = getLocalStorageItem<OrderType[]>('orders', []);
+    setOrders(loadedOrders);
     setIsLoadingOrders(false);
   }, []);
 
@@ -73,10 +83,11 @@ export default function OrderFlowApp() {
           const orderDate = parseISO(order.orderDate);
           if (differenceInMilliseconds(now, orderDate) > TWENTY_FOUR_HOURS_MS) {
             toast({
-              title: "Aged Order Alert",
-              description: `Order for ${order.customerName} (ID: ...${order.id.slice(-6)}) placed on ${format(orderDate, "MMM d, yyyy 'at' h:mm a")} is older than 24 hours.`,
-              variant: "default", 
-              duration: 7000, 
+              title: "Aged Saved Order Alert",
+              description: `Order for ${order.customerName} (ID: ...${order.id.slice(-6)}) saved on ${format(orderDate, "MMM d, yyyy 'at' h:mm a")} is older than 24 hours.`,
+              variant: "default",
+              duration: 7000,
+              action: <AlertTriangle className="h-5 w-5 text-yellow-500" />
             });
           }
         } catch (e) {
@@ -87,11 +98,34 @@ export default function OrderFlowApp() {
     }
   }, [orders, isLoadingOrders, initialAgedOrderCheckDone, toast]);
 
+  useEffect(() => {
+    if (!isLoadingPendingOrders && pendingOrders.length > 0) {
+      const now = Date.now();
+      pendingOrders.forEach(order => {
+        try {
+          const orderDate = parseISO(order.createdAt);
+          if (differenceInMilliseconds(now, orderDate) > TWENTY_FOUR_HOURS_MS) {
+            toast({
+              title: "Aged Pending Order Alert",
+              description: `Pending order for ${order.customerName} (ID: ...${order.id.slice(-6)}) created on ${format(orderDate, "MMM d, yyyy 'at' h:mm a")} is older than 24 hours and still in queue.`,
+              variant: "destructive", 
+              duration: 7000,
+              action: <AlertTriangle className="h-5 w-5 text-white" />
+            });
+          }
+        } catch (e) {
+          console.error("Error parsing pending order date for aged check:", e, order.createdAt);
+        }
+      });
+    }
+  }, [pendingOrders, isLoadingPendingOrders, toast]);
+
+
   const handleAddProduct = useCallback((productData: Omit<Product, 'id' | 'category'> & { category?: string }) => {
-    const newProduct: Product = { 
-        id: crypto.randomUUID(), 
-        ...productData, 
-        category: productData.category || '' 
+    const newProduct: Product = {
+        id: crypto.randomUUID(),
+        ...productData,
+        category: productData.category || ''
     };
     setProducts(prev => [...prev, newProduct].sort((a, b) => a.name.localeCompare(b.name)));
     toast({ title: "Product Added", description: `${newProduct.name} has been added.` });
@@ -110,28 +144,30 @@ export default function OrderFlowApp() {
     }
   }, [products, toast]);
 
-  const handleAddItemsToPendingList = useCallback((customerName: string, itemsToAdd: OrderItem[]) => {
-    if (!customerName.trim()) {
-      toast({ title: "Customer Name Required", description: "Please ensure a customer name is set.", variant: "destructive" });
+  const handleAddItemsToPendingList = useCallback((categoryName: string, itemsToAdd: OrderItem[]) => {
+    if (!categoryName.trim()) {
+      toast({ title: "Category Required", description: "Please ensure a category is selected for the batch.", variant: "destructive" });
       return;
     }
     if (itemsToAdd.length === 0) {
-      toast({ title: "No Items Staged", description: "Please stage some items first.", variant: "destructive" });
+      toast({ title: "No Items in Batch", description: "Please add items to the batch first.", variant: "destructive" });
       return;
     }
 
-    const totalAmount = itemsToAdd.reduce((total, item) => total + (item.price * item.quantity), 0);
+    const currentBatchTotal = itemsToAdd.reduce((total, item) => total + (item.price * item.quantity), 0);
     const newPendingOrder: PendingOrderType = {
         id: crypto.randomUUID(),
-        customerName,
-        items: itemsToAdd,
-        totalAmount,
+        customerName: categoryName, // Category name is used as customerName for the order
+        items: itemsToAdd, // These are the current pending items
+        totalAmount: currentBatchTotal, // Total for current pending items
+        originalItems: JSON.parse(JSON.stringify(itemsToAdd)), // Store a deep copy of original items
+        originalTotalAmount: currentBatchTotal, // Original total, same as current at creation
         createdAt: new Date().toISOString(),
     };
     setPendingOrders(prev => [newPendingOrder, ...prev].sort((a,b) => parseISO(b.createdAt).getTime() - parseISO(a.createdAt).getTime()));
-    toast({ title: "Order Batch Added to Queue", description: `Batch for ${customerName} added to pending orders.` });
+    toast({ title: "Batch Added to Queue", description: `Batch for category ${categoryName} added to pending orders.` });
   }, [toast]);
-  
+
   const handleOpenDeliveryDialog = (pendingOrder: PendingOrderType) => {
     setSelectedPendingOrderForDialog(pendingOrder);
     setIsDeliveryDialogOpen(true);
@@ -145,45 +181,62 @@ export default function OrderFlowApp() {
     }
 
     const newOrder: OrderType = {
-        id: crypto.randomUUID(),
-        customerName: orderToSave.customerName,
-        items: orderToSave.items,
-        totalAmount: orderToSave.totalAmount,
+        id: crypto.randomUUID(), // New ID for the saved order
+        customerName: orderToSave.customerName, // This is the category
+        items: orderToSave.originalItems, // Save the original items
+        totalAmount: orderToSave.originalTotalAmount, // Save the original total
         orderDate: new Date().toISOString(),
-        // category determination (if any) would go here if re-added
     };
     setOrders(prev => [newOrder, ...prev].sort((a,b) => parseISO(b.orderDate).getTime() - parseISO(a.orderDate).getTime()));
     setPendingOrders(prev => prev.filter(po => po.id !== pendingOrderId));
-    
-    toast({ title: "Order Fully Delivered!", description: `Order for ${orderToSave.customerName} marked as delivered and saved to past orders.` });
+
+    toast({ title: "Order Fully Delivered & Saved!", description: `Order for category ${orderToSave.customerName} (Original Total: $${orderToSave.originalTotalAmount.toFixed(2)}) marked as delivered and saved to past orders.` });
     setSelectedPendingOrderForDialog(null);
   }, [pendingOrders, toast]);
 
   const handleUpdatePendingOrderQuantities = useCallback((pendingOrderId: string, updatedItems: OrderItem[]) => {
     const orderToUpdate = pendingOrders.find(po => po.id === pendingOrderId);
-    if (!orderToUpdate) return;
+    if (!orderToUpdate) {
+      toast({ title: "Error", description: "Pending order not found for update.", variant: "destructive"});
+      return;
+    }
 
-    if (updatedItems.length === 0) { // All items were set to 0 quantity
+    if (updatedItems.length === 0) { // All items in the pending order were set to 0 quantity
+      // Save the original order to Past Orders
+      const newOrder: OrderType = {
+        id: crypto.randomUUID(),
+        customerName: orderToUpdate.customerName,
+        items: orderToUpdate.originalItems,
+        totalAmount: orderToUpdate.originalTotalAmount,
+        orderDate: new Date().toISOString(),
+      };
+      setOrders(prev => [newOrder, ...prev].sort((a,b) => parseISO(b.orderDate).getTime() - parseISO(a.orderDate).getTime()));
+      
+      // Remove from pending orders
       setPendingOrders(prev => prev.filter(po => po.id !== pendingOrderId));
+      
       toast({
-          title: "Order Cleared",
-          description: `All items in ${orderToUpdate.customerName}'s order were set to 0 pending. The order has been cleared from the queue.`,
+          title: "Pending Order Cleared & Original Saved",
+          description: `All pending items for category ${orderToUpdate.customerName} were cleared. Original order details saved to past orders.`,
       });
     } else {
-      const newTotalAmount = updatedItems.reduce((total, item) => total + (item.price * item.quantity), 0);
-      setPendingOrders(prev => prev.map(po => 
-        po.id === pendingOrderId ? { ...po, items: updatedItems, totalAmount: newTotalAmount } : po
+      // Update the pending order with new quantities
+      const newTotalAmountForPending = updatedItems.reduce((total, item) => total + (item.price * item.quantity), 0);
+      setPendingOrders(prev => prev.map(po =>
+        po.id === pendingOrderId 
+        ? { ...po, items: updatedItems, totalAmount: newTotalAmountForPending } // originalItems and originalTotalAmount remain unchanged
+        : po
       ).sort((a,b) => parseISO(b.createdAt).getTime() - parseISO(a.createdAt).getTime()));
-       // Toast is handled in DeliveryConfirmationDialog for this case (or it can be moved here too)
+      // Toast for this case is handled in DeliveryConfirmationDialog
     }
-    setSelectedPendingOrderForDialog(null);
+    setSelectedPendingOrderForDialog(null); // Close dialog in all cases
   }, [pendingOrders, toast]);
 
   const handleRemovePendingOrder = useCallback((pendingOrderId: string) => {
     const orderToRemove = pendingOrders.find(po => po.id === pendingOrderId);
     if (!orderToRemove) return;
     setPendingOrders(prev => prev.filter(po => po.id !== pendingOrderId));
-    toast({ title: "Pending Order Removed", description: `Pending order for ${orderToRemove.customerName} has been removed.`, variant: "destructive" });
+    toast({ title: "Pending Order Removed", description: `Pending order for category ${orderToRemove.customerName} has been removed from the queue.`, variant: "destructive" });
   }, [pendingOrders, toast]);
 
   if (isLoadingProducts || isLoadingPendingOrders || isLoadingOrders) {
@@ -215,7 +268,7 @@ export default function OrderFlowApp() {
               <HistoryIcon className="mr-2 h-4 w-4" /> Past Orders
             </TabsTrigger>
           </TabsList>
-          
+
           <TabsContent value="create-order" className="mt-0 space-y-6">
             <Card className="shadow-lg">
               <CardHeader>
@@ -225,39 +278,49 @@ export default function OrderFlowApp() {
                  {pendingOrders.length > 0 ? (
                   <div className="space-y-6">
                     {pendingOrders.map((pendingOrder) => (
-                      <Card key={pendingOrder.id} className="bg-muted/20 shadow-md">
-                        <CardHeader>
-                          <div className="flex justify-between items-center">
-                            <CardTitle className="text-lg text-primary">{pendingOrder.customerName}</CardTitle>
-                             <Button 
-                                variant="ghost" 
-                                size="icon" 
+                      <Card key={pendingOrder.id} className="bg-card shadow-md border border-border">
+                        <CardHeader className="pb-3">
+                          <div className="flex justify-between items-start">
+                            <div>
+                                <CardTitle className="text-lg text-primary">{pendingOrder.customerName}</CardTitle>
+                                <p className="text-xs text-muted-foreground">
+                                    Added: {format(parseISO(pendingOrder.createdAt), "MMM d, HH:mm")}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                    Original Total: <span className="font-medium">${pendingOrder.originalTotalAmount.toFixed(2)}</span>
+                                </p>
+                            </div>
+                             <Button
+                                variant="ghost"
+                                size="icon"
                                 onClick={() => handleRemovePendingOrder(pendingOrder.id)}
-                                className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 w-8"
+                                className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 w-8 shrink-0"
+                                aria-label="Remove pending order"
                             >
                                 <Trash2 className="h-4 w-4" />
-                                <span className="sr-only">Remove Pending Order</span>
                             </Button>
                           </div>
                         </CardHeader>
                         <CardContent>
-                          <ul className="space-y-1 text-sm border p-3 rounded-md bg-background mb-3">
+                          <h4 className="text-sm font-medium mb-1">Current Pending Items:</h4>
+                          <ul className="space-y-1 text-sm border p-3 rounded-md bg-background/70 mb-3 max-h-40 overflow-y-auto">
                             {pendingOrder.items.map(item => (
                               <li key={item.productId} className="flex justify-between">
                                 <span>{item.productName} (x{item.quantity})</span>
                                 <span>${(item.price * item.quantity).toFixed(2)}</span>
                               </li>
                             ))}
-                             {pendingOrder.items.length === 0 && <li className="text-muted-foreground text-center">No items pending for this order.</li>}
+                             {pendingOrder.items.length === 0 && <li className="text-muted-foreground text-center italic py-2">No items currently pending for this order.</li>}
                           </ul>
-                          <div className="flex justify-between items-center mt-3 pt-3 border-t">
-                            <p className="font-semibold text-lg">Subtotal: <span className="text-primary">${pendingOrder.totalAmount.toFixed(2)}</span></p>
-                            <Button 
-                              onClick={() => handleOpenDeliveryDialog(pendingOrder)} 
+                          <div className="flex flex-col sm:flex-row justify-between items-center mt-3 pt-3 border-t">
+                            <p className="font-semibold text-base sm:text-lg mb-2 sm:mb-0">
+                                Current Pending Total: <span className="text-accent">${pendingOrder.totalAmount.toFixed(2)}</span>
+                            </p>
+                            <Button
+                              onClick={() => handleOpenDeliveryDialog(pendingOrder)}
                               size="default"
-                              disabled={pendingOrder.items.length === 0}
                             >
-                              <Edit className="mr-2 h-5 w-5" /> 
+                              <Edit className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />
                               Process Delivery
                             </Button>
                           </div>
@@ -266,7 +329,7 @@ export default function OrderFlowApp() {
                     ))}
                   </div>
                 ) : (
-                    <p className="text-muted-foreground text-sm text-center py-4 bg-muted/30 rounded-md">No orders currently pending. Use "Create Item Batch" below to add new orders to the queue.</p>
+                    <p className="text-muted-foreground text-sm text-center py-4 bg-muted/30 rounded-md">No orders currently pending. Use "Create Item Batch by Category" below to add new orders to the queue.</p>
                 )}
               </CardContent>
             </Card>
