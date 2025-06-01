@@ -22,15 +22,32 @@ export default function OrderCreation({
   onAddItemsToPendingList,
 }: OrderCreationProps) {
   const { toast } = useToast();
-  const [currentCustomerName, setCurrentCustomerName] = useState<string>('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [stagedItems, setStagedItems] = useState<OrderItem[]>([]);
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [quantity, setQuantity] = useState<number>(1);
-  const [isSubmitting, setIsSubmitting] = useState(false); // Used for the "Add to Pending Queue" button
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const uniqueCategories = useMemo(() => {
+    const categories = new Set<string>();
+    products.forEach(p => {
+      if (p.category) {
+        categories.add(p.category);
+      }
+    });
+    return Array.from(categories).sort();
+  }, [products]);
+
+  const filteredProducts = useMemo(() => {
+    if (!selectedCategory) {
+      return []; // Or products if you want to show all by default before category selection
+    }
+    return products.filter(p => p.category === selectedCategory);
+  }, [products, selectedCategory]);
 
   const handleStageItem = () => {
-    if (!currentCustomerName.trim()) {
-      toast({ title: "Customer Name Required", description: "Please enter a customer name for this batch of items.", variant: "destructive" });
+    if (!selectedCategory.trim()) {
+      toast({ title: "Category Required", description: "Please select a category for this batch of items.", variant: "destructive" });
       return;
     }
     if (!selectedProductId) {
@@ -41,9 +58,9 @@ export default function OrderCreation({
       toast({ title: "Invalid Quantity", description: "Quantity must be greater than 0.", variant: "destructive" });
       return;
     }
-    const product = products.find(p => p.id === selectedProductId);
+    const product = filteredProducts.find(p => p.id === selectedProductId);
     if (!product) {
-      toast({ title: "Error", description: "Product not found.", variant: "destructive" });
+      toast({ title: "Error", description: "Product not found in the selected category.", variant: "destructive" });
       return;
     }
 
@@ -52,10 +69,10 @@ export default function OrderCreation({
       if (existingItemIndex > -1) {
         const updatedItems = [...prevItems];
         updatedItems[existingItemIndex].quantity += quantity;
-        toast({ title: "Quantity Updated", description: `${product.name} quantity increased to ${updatedItems[existingItemIndex].quantity} in ${currentCustomerName}'s batch.` });
+        toast({ title: "Quantity Updated", description: `${product.name} quantity increased to ${updatedItems[existingItemIndex].quantity} in ${selectedCategory}'s batch.` });
         return updatedItems;
       } else {
-        toast({ title: "Item Added to Batch", description: `${product.name} (x${quantity}) added to ${currentCustomerName}'s current batch.` });
+        toast({ title: "Item Added to Batch", description: `${product.name} (x${quantity}) added to ${selectedCategory}'s current batch.` });
         return [...prevItems, { productId: product.id, productName: product.name, quantity, price: product.price }];
       }
     });
@@ -71,23 +88,23 @@ export default function OrderCreation({
     const item = stagedItems.find(i => i.productId === productId);
     setStagedItems(prev => prev.filter(item => item.productId !== productId));
     if (item) {
-        toast({ title: "Item Removed from Batch", description: `${item.productName} removed from ${currentCustomerName}'s current batch.`, variant: "destructive" });
+        toast({ title: "Item Removed from Batch", description: `${item.productName} removed from ${selectedCategory}'s current batch.`, variant: "destructive" });
     }
   };
 
   const handleAddBatchToPendingList = () => {
-    if (!currentCustomerName.trim()) {
-      toast({ title: "Customer Name Missing", description: "Please enter a customer name before adding the batch.", variant: "destructive" });
+    if (!selectedCategory.trim()) {
+      toast({ title: "Category Missing", description: "Please select a category before adding the batch.", variant: "destructive" });
       return;
     }
     if (stagedItems.length === 0) {
-      toast({ title: "No Items in Batch", description: "Please add items to the current batch for this customer.", variant: "destructive" });
+      toast({ title: "No Items in Batch", description: "Please add items to the current batch for this category.", variant: "destructive" });
       return;
     }
     setIsSubmitting(true);
-    onAddItemsToPendingList(currentCustomerName, stagedItems);
-    // Clear staging area for the next customer/batch
-    setCurrentCustomerName('');
+    onAddItemsToPendingList(selectedCategory, stagedItems);
+    // Clear staging area for the next category/batch
+    setSelectedCategory(''); // Keep category or clear? Let's clear for now.
     setStagedItems([]);
     setSelectedProductId('');
     setQuantity(1);
@@ -104,36 +121,47 @@ export default function OrderCreation({
     return stagedItems.reduce((total, item) => total + (item.price * item.quantity), 0);
   }, [stagedItems]);
 
+  const handleCategoryChange = (value: string) => {
+    setSelectedCategory(value);
+    setSelectedProductId(''); // Reset product selection when category changes
+    // Optionally reset staged items if category changes: setStagedItems([]);
+  };
+
   return (
     <Card className="shadow-lg">
       <CardHeader>
-        <CardTitle className="font-headline flex items-center"><PackagePlus className="mr-2 h-5 w-5 text-primary" /> Create Item Batch for a Customer</CardTitle>
+        <CardTitle className="font-headline flex items-center"><PackagePlus className="mr-2 h-5 w-5 text-primary" /> Create Item Batch by Category</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="space-y-4 p-4 border rounded-md bg-card shadow-sm">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
             <div className="md:col-span-3">
-              <Label htmlFor="customerNameStaging">Customer Name for this Batch</Label>
-              <Input
-                  id="customerNameStaging"
-                  placeholder="Enter customer name for this batch"
-                  value={currentCustomerName}
-                  onChange={(e) => setCurrentCustomerName(e.target.value)}
-                  disabled={isSubmitting}
-              />
-            </div>
-            <div className="md:col-span-2 space-y-1">
-              <Label htmlFor="productSelectStaging">Product</Label>
-              <Select value={selectedProductId} onValueChange={setSelectedProductId} disabled={isSubmitting}>
-                <SelectTrigger id="productSelectStaging">
-                  <SelectValue placeholder="Select a product" />
+              <Label htmlFor="categorySelectStaging">Select Category (Customer Group)</Label>
+              <Select value={selectedCategory} onValueChange={handleCategoryChange} disabled={isSubmitting}>
+                <SelectTrigger id="categorySelectStaging">
+                  <SelectValue placeholder="Select a category" />
                 </SelectTrigger>
                 <SelectContent>
-                  {products.length > 0 ? products.map((product) => (
-                    <SelectItem key={product.id} value={product.id}>
-                      {product.name} (${product.price.toFixed(2)}) {product.category ? `[${product.category}]` : ''}
+                  {uniqueCategories.length > 0 ? uniqueCategories.map((category) => (
+                    <SelectItem key={category} value={category}>
+                      {category}
                     </SelectItem>
-                  )) : <SelectItem value="no-product" disabled>No products available</SelectItem>}
+                  )) : <SelectItem value="no-category" disabled>No categories available (Add categories to products)</SelectItem>}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="md:col-span-2 space-y-1">
+              <Label htmlFor="productSelectStaging">Product (from selected category)</Label>
+              <Select value={selectedProductId} onValueChange={setSelectedProductId} disabled={isSubmitting || !selectedCategory}>
+                <SelectTrigger id="productSelectStaging" disabled={!selectedCategory || filteredProducts.length === 0}>
+                  <SelectValue placeholder={selectedCategory ? "Select a product" : "Select category first"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {filteredProducts.length > 0 ? filteredProducts.map((product) => (
+                    <SelectItem key={product.id} value={product.id}>
+                      {product.name} (${product.price.toFixed(2)})
+                    </SelectItem>
+                  )) : <SelectItem value="no-product" disabled>{selectedCategory ? "No products in this category" : "Select category to see products"}</SelectItem>}
                 </SelectContent>
               </Select>
             </div>
@@ -145,18 +173,18 @@ export default function OrderCreation({
                 min="1"
                 value={quantity}
                 onChange={(e) => setQuantity(parseInt(e.target.value, 10) || 1)}
-                disabled={isSubmitting}
+                disabled={isSubmitting || !selectedProductId}
               />
             </div>
           </div>
-          <Button onClick={handleStageItem} className="mt-3 w-full md:w-auto" disabled={isSubmitting || products.length === 0 || !selectedProductId || !currentCustomerName.trim()}>
-            <PlusCircle className="mr-2 h-4 w-4" /> Add Product to {currentCustomerName || "Customer"}'s Batch
+          <Button onClick={handleStageItem} className="mt-3 w-full md:w-auto" disabled={isSubmitting || filteredProducts.length === 0 || !selectedProductId || !selectedCategory.trim()}>
+            <PlusCircle className="mr-2 h-4 w-4" /> Add Product to {selectedCategory || "Category"}'s Batch
           </Button>
         </div>
 
         {stagedItems.length > 0 && (
           <div>
-            <h3 className="text-lg font-medium mb-2">Current Batch for: <span className="text-primary">{currentCustomerName || "..."}</span></h3>
+            <h3 className="text-lg font-medium mb-2">Current Batch for Category: <span className="text-primary">{selectedCategory || "..."}</span></h3>
             <div className="border rounded-md overflow-hidden shadow-sm">
               <Table>
                 <TableHeader>
@@ -190,21 +218,22 @@ export default function OrderCreation({
               </Table>
             </div>
             <div className="flex flex-col sm:flex-row items-center justify-between mt-4 space-y-2 sm:space-y-0">
-                <p className="text-xl font-semibold">Batch Total for {currentCustomerName || "..."}: <span className="text-accent">${stagedItemsTotal.toFixed(2)}</span></p>
-                <Button onClick={handleAddBatchToPendingList} size="lg" disabled={isSubmitting || stagedItems.length === 0 || !currentCustomerName.trim()}>
+                <p className="text-xl font-semibold">Batch Total for {selectedCategory || "..."}: <span className="text-accent">${stagedItemsTotal.toFixed(2)}</span></p>
+                <Button onClick={handleAddBatchToPendingList} size="lg" disabled={isSubmitting || stagedItems.length === 0 || !selectedCategory.trim()}>
                     {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     <ListChecks className="mr-2 h-5 w-5" /> Add This Batch to Pending Orders Queue
                 </Button>
             </div>
           </div>
         )}
-         {stagedItems.length === 0 && currentCustomerName.trim() && (
-            <p className="text-muted-foreground text-center py-3 bg-muted/30 rounded-md">No items currently in the batch for <span className="text-primary">{currentCustomerName}</span>. Add products using the form above.</p>
+         {stagedItems.length === 0 && selectedCategory.trim() && (
+            <p className="text-muted-foreground text-center py-3 bg-muted/30 rounded-md">No items currently in the batch for category <span className="text-primary">{selectedCategory}</span>. Add products using the form above.</p>
          )}
-         {stagedItems.length === 0 && !currentCustomerName.trim() && (
-            <p className="text-muted-foreground text-center py-3 bg-muted/30 rounded-md">Enter a customer name and add products to start a new batch.</p>
+         {stagedItems.length === 0 && !selectedCategory.trim() && (
+            <p className="text-muted-foreground text-center py-3 bg-muted/30 rounded-md">Select a category and add products to start a new batch.</p>
          )}
       </CardContent>
     </Card>
   );
 }
+
